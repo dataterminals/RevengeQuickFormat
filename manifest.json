@@ -1,0 +1,13 @@
+{
+	"name": "QuickFormat",
+	"description": "A live, always-on style-override editor for Discord mobile — the mobile answer to Vencord's QuickCSS.",
+	"authors": [
+		{
+			"name": "sylviab"
+		}
+	],
+	"main": "src/index.ts",
+	"vendetta": {
+		"icon": "PaintbrushIcon"
+	}
+}
