@@ -34,8 +34,8 @@ export interface Target {
 	// "experimental" targets depend on Discord internals that may shift between
 	// app versions and need on-device verification.
 	status: TargetStatus;
-	// Apply `style` to this target. Must be self-contained and return an
-	// Unpatch that fully reverts. Should never throw for a missing module —
-	// fail safe (the engine also guards, but targets should degrade gracefully).
-	apply(style: StyleObject): Unpatch;
+	// Resolve the component reference this target styles. The engine injects the
+	// user's style whenever React creates an element of this exact component.
+	// Returns null/undefined when the component can't be found.
+	resolve(): unknown;
 }

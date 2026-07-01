@@ -20,6 +20,17 @@ export function runDiagnostics(): string {
 	lines.push(probe("RN.TextInput", RN?.TextInput));
 	lines.push(probe("RN.View", RN?.View));
 
+	// Element-creation entry points the injection engine patches.
+	try {
+		const rt: any = findByProps("jsx", "jsxs");
+		const dev: any = findByProps("jsxDEV");
+		lines.push(
+			`createElement=${typeof (React as any)?.createElement} jsx=${typeof rt?.jsx} jsxs=${typeof rt?.jsxs} jsxDEV=${typeof dev?.jsxDEV}`,
+		);
+	} catch (e) {
+		lines.push(`jsx runtime err ${(e as Error).message}`);
+	}
+
 	// Discord ships its own design-system Text; it may be the real target.
 	try {
 		const p: any = findByProps("Text", "View");
