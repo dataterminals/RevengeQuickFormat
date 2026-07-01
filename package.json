@@ -3,6 +3,7 @@
 	"version": "0.1.0",
 	"private": true,
 	"description": "QuickFormat — a live style-override editor for Discord mobile (Revenge / Vendetta-compatible plugin).",
+	"author": "dataterminals",
 	"license": "MIT",
 	"type": "module",
 	"scripts": {
