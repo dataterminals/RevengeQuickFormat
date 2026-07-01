@@ -13,10 +13,10 @@ export const vstorage = storage as unknown as QuickFormatStorage;
 
 export const DEFAULT_SOURCE = [
 	"{",
-	'\t// Map a target key to a React Native style object.',
-	'\t// Run the plugin, then open this editor to see the available targets.',
-	'\t// Example:',
-	'\t//   "messageText": { "fontSize": 16 }',
+	'\t// Map a target key (see "Available targets" below) to a React Native',
+	'\t// style object. Tap "Save & apply" to see changes live.',
+	'\t// Try uncommenting this:',
+	'\t// "text": { "fontSize": 18, "color": "#ff5555" }',
 	"}",
 ].join("\n");
 

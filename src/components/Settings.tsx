@@ -49,7 +49,7 @@ export default function Settings() {
 
 	const save = () => {
 		vstorage.source = draft;
-		reapply();
+		reapply(true);
 	};
 
 	return (
@@ -60,7 +60,7 @@ export default function Settings() {
 				value={vstorage.enabled}
 				onValueChange={(v: boolean) => {
 					vstorage.enabled = v;
-					reapply();
+					reapply(true);
 				}}
 			/>
 			<FormDivider />

@@ -5,6 +5,15 @@ import type { Sheet, Unpatch } from "../types";
 // disable can cleanly revert everything.
 let active: Unpatch[] = [];
 
+export interface ApplyResult {
+	// Target keys that patched successfully.
+	applied: string[];
+	// Keys in the sheet that don't correspond to any known target.
+	skipped: string[];
+	// Keys whose target threw while binding, with the reason.
+	failed: { key: string; reason: string }[];
+}
+
 // Revert every applied override.
 export function clear(): void {
 	const toUndo = active;
@@ -19,20 +28,24 @@ export function clear(): void {
 }
 
 // Apply a parsed sheet. Clears any previously applied overrides first, so this
-// is safe to call repeatedly (e.g. after every save). `log` receives
-// non-fatal, human-readable problems.
-export function applySheet(sheet: Sheet, log?: (msg: string) => void): void {
+// is safe to call repeatedly (e.g. after every save).
+export function applySheet(sheet: Sheet): ApplyResult {
 	clear();
+	const result: ApplyResult = { applied: [], skipped: [], failed: [] };
+
 	for (const [key, style] of Object.entries(sheet)) {
 		const target = getTarget(key);
 		if (!target) {
-			log?.(`Unknown target "${key}"`);
+			result.skipped.push(key);
 			continue;
 		}
 		try {
 			active.push(target.apply(style));
+			result.applied.push(key);
 		} catch (e) {
-			log?.(`Failed to apply "${key}": ${(e as Error).message}`);
+			result.failed.push({ key, reason: (e as Error).message });
 		}
 	}
+
+	return result;
 }
