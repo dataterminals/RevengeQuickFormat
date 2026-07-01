@@ -1,6 +1,5 @@
-import { React, ReactNative as RN, stylesheet } from "@vendetta/metro/common";
+import { React, ReactNative as RN } from "@vendetta/metro/common";
 import { useProxy } from "@vendetta/storage";
-import { semanticColors } from "@vendetta/ui";
 import { Forms } from "@vendetta/ui/components";
 
 import { reapply } from "../controller";
@@ -11,27 +10,43 @@ import { vstorage } from "../storage";
 const { FormSection, FormRow, FormSwitchRow, FormDivider } = Forms;
 const { ScrollView, Text, TextInput } = RN;
 
-const styles = stylesheet.createThemedStyleSheet({
+// Explicit high-contrast colours rather than themed semantic colours: on some
+// Revenge builds the semantic colours don't resolve here and text falls back to
+// black, which is unreadable on a dark background. A dark editor box with light
+// text stays readable under both light and dark app themes.
+const COLORS = {
+	editorBg: "#1e1f22",
+	editorText: "#f2f3f5",
+	editorBorder: "#3f4147",
+	placeholder: "#87898c",
+	error: "#f23f43",
+	hint: "#949ba4",
+};
+
+const styles = RN.StyleSheet.create({
 	editor: {
 		minHeight: 220,
 		marginHorizontal: 12,
 		marginVertical: 8,
 		padding: 12,
 		borderRadius: 8,
-		color: semanticColors.TEXT_NORMAL,
-		backgroundColor: semanticColors.BACKGROUND_SECONDARY,
+		borderWidth: 1,
+		borderColor: COLORS.editorBorder,
+		color: COLORS.editorText,
+		backgroundColor: COLORS.editorBg,
 		fontFamily: "monospace",
 		fontSize: 14,
+		lineHeight: 20,
 		textAlignVertical: "top",
 	},
 	error: {
-		color: semanticColors.TEXT_DANGER,
+		color: COLORS.error,
 		marginHorizontal: 16,
 		marginVertical: 2,
 		fontSize: 13,
 	},
 	hint: {
-		color: semanticColors.TEXT_MUTED,
+		color: COLORS.hint,
 		marginHorizontal: 16,
 		marginVertical: 2,
 		fontSize: 13,
@@ -74,7 +89,7 @@ export default function Settings() {
 					autoCapitalize="none"
 					autoCorrect={false}
 					placeholder="{ }"
-					placeholderTextColor={semanticColors.TEXT_MUTED}
+					placeholderTextColor={COLORS.placeholder}
 				/>
 				{errors.length === 0 ? (
 					<Text style={styles.hint}>No problems found.</Text>
