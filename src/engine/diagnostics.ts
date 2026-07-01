@@ -1,0 +1,51 @@
+import { React, ReactNative } from "@vendetta/metro/common";
+import { findByProps } from "@vendetta/metro";
+import { showToast } from "@vendetta/ui/toasts";
+
+// Report the shape of the runtime objects QuickFormat needs to patch, so we can
+// figure out the correct binding without a full debug console. This is the
+// mobile stand-in for poking around in DevTools.
+function probe(label: string, obj: any): string {
+	if (obj == null) return `${label}: <${obj}>`;
+	const name = obj.displayName || obj.name || "?";
+	const sym = obj.$$typeof ? String(obj.$$typeof) : "-";
+	return `${label}: type=${typeof obj} name=${name} $$typeof=${sym} render=${typeof obj.render} proto.render=${typeof obj?.prototype?.render}`;
+}
+
+export function runDiagnostics(): string {
+	const RN: any = ReactNative;
+	const lines: string[] = [];
+	lines.push(`React=${(React as any)?.version ?? "?"} RN=${typeof RN}`);
+	lines.push(probe("RN.Text", RN?.Text));
+	lines.push(probe("RN.TextInput", RN?.TextInput));
+	lines.push(probe("RN.View", RN?.View));
+
+	// Discord ships its own design-system Text; it may be the real target.
+	try {
+		const p: any = findByProps("Text", "View");
+		lines.push(
+			`findByProps(Text,View)=${
+				p ? "found keys:" + Object.keys(p).slice(0, 8).join(",") : "null"
+			}`,
+		);
+		if (p?.Text) lines.push(probe("  ↳ .Text", p.Text));
+	} catch (e) {
+		lines.push(`findByProps err ${(e as Error).message}`);
+	}
+
+	return lines.join("\n");
+}
+
+// Copy the diagnostics to the clipboard (via the metro Clipboard module) so it
+// can be pasted back for debugging.
+export function copyDiagnostics(): void {
+	const report = runDiagnostics();
+	console.log("[QuickFormat] diagnostics:\n" + report);
+	try {
+		const Clipboard: any = findByProps("setString", "getString");
+		Clipboard.setString(report);
+		showToast("QuickFormat: diagnostics copied");
+	} catch {
+		showToast("QuickFormat: copy failed (logged to console)");
+	}
+}

@@ -2,7 +2,8 @@ import { React, ReactNative as RN } from "@vendetta/metro/common";
 import { useProxy } from "@vendetta/storage";
 import { Forms } from "@vendetta/ui/components";
 
-import { reapply } from "../controller";
+import { getLastResult, reapply } from "../controller";
+import { copyDiagnostics } from "../engine/diagnostics";
 import { parseSheet } from "../engine/parser";
 import { targets } from "../engine/targets";
 import { vstorage } from "../storage";
@@ -61,6 +62,7 @@ export default function Settings() {
 	const [draft, setDraft] = React.useState(vstorage.source);
 	const { errors } = parseSheet(draft);
 	const dirty = draft !== vstorage.source;
+	const last = getLastResult();
 
 	const save = () => {
 		vstorage.source = draft;
@@ -109,6 +111,24 @@ export default function Settings() {
 			/>
 			<FormDivider />
 
+			{last && (
+				<FormSection title="Last apply">
+					<Text style={styles.hint}>
+						applied: {last.applied.join(", ") || "none"}
+					</Text>
+					{last.skipped.length > 0 && (
+						<Text style={styles.error}>
+							unknown: {last.skipped.join(", ")}
+						</Text>
+					)}
+					{last.failed.map((f, i) => (
+						<Text key={i} style={styles.error}>
+							failed {f.key}: {f.reason}
+						</Text>
+					))}
+				</FormSection>
+			)}
+
 			<FormSection title="Available targets">
 				{targets.map((t) => (
 					<FormRow
@@ -119,6 +139,15 @@ export default function Settings() {
 						}`}
 					/>
 				))}
+			</FormSection>
+			<FormDivider />
+
+			<FormSection title="Troubleshooting">
+				<FormRow
+					label="Copy runtime diagnostics"
+					subLabel="Copies component info to the clipboard to share for debugging."
+					onPress={copyDiagnostics}
+				/>
 			</FormSection>
 		</ScrollView>
 	);

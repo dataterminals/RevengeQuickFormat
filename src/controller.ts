@@ -1,27 +1,35 @@
 import { showToast } from "@vendetta/ui/toasts";
 
-import { applySheet, clear } from "./engine/apply";
+import { type ApplyResult, applySheet, clear } from "./engine/apply";
 import { parseSheet } from "./engine/parser";
 import { vstorage } from "./storage";
+
+// The outcome of the most recent apply, so the settings UI can show exactly
+// what happened (which keys applied / were unknown / failed and why).
+let last: ApplyResult | null = null;
+export function getLastResult(): ApplyResult | null {
+	return last;
+}
 
 // Re-evaluate the current sheet and (re)apply it. Called on load and whenever
 // the user toggles the plugin or saves the editor. Lives in its own module so
 // both the entry point and the settings UI can import it without a cycle.
 //
-// `notify` shows an on-device toast summarising what happened — handy for
-// testing without a debug console. Off by default so app launches stay quiet.
+// `notify` shows an on-device toast summary on user actions; off by default so
+// app launches stay quiet.
 export function reapply(notify = false): void {
 	clear();
 
 	if (!vstorage.enabled) {
+		last = null;
 		if (notify) showToast("QuickFormat: disabled");
 		return;
 	}
 
 	const { sheet, errors } = parseSheet(vstorage.source);
 	const result = applySheet(sheet);
+	last = result;
 
-	// Surface details to the console for anyone with debugging on.
 	for (const msg of errors) console.warn(`[QuickFormat] ${msg}`);
 	for (const f of result.failed) console.warn(`[QuickFormat] ${f.key}: ${f.reason}`);
 
