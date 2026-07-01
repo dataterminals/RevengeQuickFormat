@@ -1,5 +1,6 @@
 node_modules/
-dist/
+# dist/ is committed on purpose: Revenge installs the plugin from the raw
+# GitHub URL of this folder, so the built output must be tracked.
 *.log
 .DS_Store
 .vscode/
