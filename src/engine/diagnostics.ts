@@ -180,6 +180,13 @@ export function runDiagnostics(): string {
 		`dmListEl: ${hideStats.listEl ?? "not captured — no element exposes a channel array (list may be lazy/getItem-based)"}`,
 	);
 
+	if (hideStats.userEls.length) {
+		lines.push("userEls (member-list hunt):");
+		for (const e of hideStats.userEls) lines.push(`  ${e}`);
+	} else {
+		lines.push("userEls: none yet — open a server member list, then copy again");
+	}
+
 	const rowTypes = Object.keys(capturedRows);
 	if (rowProbeNote) {
 		lines.push(`rows: ${rowProbeNote}`);

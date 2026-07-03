@@ -66,6 +66,7 @@ export const hideStats = {
 	dmDataFiltered: 0,
 	channelEl: null as string | null,
 	listEl: null as string | null,
+	userEls: [] as string[],
 };
 
 // A stable component that renders nothing. Only ever swapped in for elements
@@ -141,6 +142,21 @@ function hook(args: any[]): any[] | undefined {
 				const t: any = type;
 				const name = t?.displayName || t?.name || (typeof t === "string" ? t : typeof t);
 				hideStats.channelEl = `type=${name} keys=[${Object.keys(props).slice(0, 16).join(",")}] ch.type=${props.channel.type} recip=${JSON.stringify(props.channel.recipients)?.slice(0, 50)}`;
+			} catch {
+				/* ignore */
+			}
+		}
+
+		// Diagnostic: record a few distinct user-bearing element shapes, to locate
+		// the member-list row (populated once a server member list is open).
+		if ((props?.user?.id || props?.member) && hideStats.userEls.length < 5) {
+			try {
+				const t: any = type;
+				const name = t?.displayName || t?.name || (typeof t === "string" ? t : typeof t);
+				if (!hideStats.userEls.some((s) => s.startsWith(`type=${name} `))) {
+					const uid = props.user?.id ?? props.member?.userId ?? props.member?.user?.id ?? "?";
+					hideStats.userEls.push(`type=${name} keys=[${Object.keys(props).slice(0, 12).join(",")}] uid=${uid}`);
+				}
 			} catch {
 				/* ignore */
 			}
