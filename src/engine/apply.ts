@@ -1,6 +1,6 @@
 import { React } from "@vendetta/metro/common";
-import { findByProps } from "@vendetta/metro";
-import { before } from "@vendetta/patcher";
+import { findByName, findByProps } from "@vendetta/metro";
+import { before, instead } from "@vendetta/patcher";
 
 import { getTarget } from "./targets";
 import { findBlockedUserId, parseUserTarget } from "./match";
@@ -34,6 +34,12 @@ import type { Sheet, StyleObject, Unpatch } from "../types";
 // position and throws "rendered fewer hooks than expected" — which froze the app
 // after opening a hidden user's DM. Merging a style keeps the element mounted
 // (its hooks/effects/subscriptions intact) and simply hides it.
+//
+// Messages get an extra, data-layer pass: style-hiding a message row leaves
+// Discord's skeleton placeholder behind, so we also patch RowManager.generate to
+// render a blocked author's row from an emptied clone (see install()). The two
+// layers compose — the row generates as nothing and the style backstop collapses
+// whatever remains.
 // ---------------------------------------------------------------------------
 
 // component reference -> styles to inject onto it
@@ -55,6 +61,29 @@ export interface ApplyResult {
 function mergeStyle(props: any, styles: StyleObject[]): any {
 	const base = props ?? {};
 	return { ...base, style: [base.style, ...styles] };
+}
+
+// A copy of a message row with everything renderable stripped out, so that
+// RowManager.generate produces an empty row instead of a skeleton placeholder.
+// We clone (never mutate the store's MessageRecord) and keep identity fields
+// (id, author, type, timestamp) so generate still runs normally.
+function blankMessageRow(row: any): any {
+	return {
+		...row,
+		renderContentOnly: true,
+		message: {
+			...row.message,
+			content: "",
+			customRenderedContent: null,
+			attachments: [],
+			embeds: [],
+			stickers: [],
+			stickerItems: [],
+			soundboardSounds: [],
+			components: [],
+			codedLinks: [],
+		},
+	};
 }
 
 // spitroast `before` hook: element-creation calls look like (type, props, ...).
@@ -102,6 +131,35 @@ function install(): void {
 	add("jsx", findByProps("jsx", "jsxs"));
 	add("jsxs", findByProps("jsx", "jsxs"));
 	add("jsxDEV", findByProps("jsxDEV"));
+
+	// Data-layer message hide. When a message row belongs to a blocked user, run
+	// RowManager.generate on an emptied clone so the row renders as nothing rather
+	// than leaving a skeleton placeholder behind. Guarded end to end: on any error
+	// we fall back to the original call, so the worst case is "doesn't hide".
+	if (blockedIds.size) {
+		try {
+			const RowManager: any = findByName("RowManager");
+			const proto = RowManager?.prototype;
+			if (typeof proto?.generate === "function") {
+				patches.push(
+					instead("generate", proto, function (this: unknown, args: any[], orig: any) {
+						try {
+							const row = args?.[0];
+							const id = row?.rowType === 1 ? row.message?.author?.id : undefined;
+							if (id && blockedIds.has(id)) {
+								return orig.call(this, blankMessageRow(row));
+							}
+						} catch {
+							/* fall through to the original */
+						}
+						return orig.apply(this, args);
+					}),
+				);
+			}
+		} catch (e) {
+			console.warn("[QuickFormat] RowManager hide unavailable:", e);
+		}
+	}
 }
 
 function uninstall(): void {
