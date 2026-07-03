@@ -176,6 +176,9 @@ export function runDiagnostics(): string {
 	lines.push(
 		`dmRowEl: ${hideStats.channelEl ?? "not captured — DM rows may render from an id, not a channel object"}`,
 	);
+	lines.push(
+		`dmListEl: ${hideStats.listEl ?? "not captured — no element exposes a channel array (list may be lazy/getItem-based)"}`,
+	);
 
 	const rowTypes = Object.keys(capturedRows);
 	if (rowProbeNote) {

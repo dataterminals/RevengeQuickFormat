@@ -65,6 +65,7 @@ export const hideStats = {
 	dmRowHidden: 0,
 	dmDataFiltered: 0,
 	channelEl: null as string | null,
+	listEl: null as string | null,
 };
 
 // A stable component that renders nothing. Only ever swapped in for elements
@@ -87,23 +88,6 @@ function isBlockedDMChannel(ch: any): boolean {
 function resolveChannel(item: any): any {
 	if (typeof item === "string") return channelStoreRef?.getChannel?.(item);
 	return item?.channel ?? item;
-}
-
-// If `data` is a channel list containing blocked DMs, return it with those
-// removed; otherwise null (leave it untouched). Cheap-gated on the first few
-// items so non-channel lists — e.g. the message list — aren't scanned in full.
-function filterChannelData(data: any[]): any[] | null {
-	let looksLikeChannels = false;
-	for (let i = 0; i < Math.min(3, data.length); i++) {
-		const t = resolveChannel(data[i])?.type;
-		if (t === 1 || t === 3) {
-			looksLikeChannels = true;
-			break;
-		}
-	}
-	if (!looksLikeChannels) return null;
-	const filtered = data.filter((item) => !isBlockedDMChannel(resolveChannel(item)));
-	return filtered.length === data.length ? null : filtered;
 }
 
 export interface ApplyResult {
@@ -163,16 +147,33 @@ function hook(args: any[]): any[] | undefined {
 		}
 
 		if (blockedIds.size) {
-			// DM list is a data-driven list: remove blocked DMs from its `data`
-			// array so the whole cell disappears (no clickable gap), whatever store
-			// feeds it. No-op for other lists; returns original props otherwise.
-			const data = props?.data;
-			if (Array.isArray(data) && data.length && typeof props.renderItem === "function") {
-				const filtered = filterChannelData(data);
-				if (filtered) {
-					hideStats.dmDataFiltered += data.length - filtered.length;
+			// The DM list feeds its rows from a channel array held in *some* prop
+			// (the name varies by list component). Scan this composite element's
+			// array props; if one is a channel list, drop blocked DMs from it so the
+			// whole cell is removed (no clickable gap). Filters a copy onto a fresh
+			// props object — never mutating a shared array — and only when a blocked
+			// DM is actually present, so other elements pass through untouched.
+			if (typeof type !== "string" && props) {
+				let nextProps: any = null;
+				for (const k of Object.keys(props)) {
+					const v = (props as any)[k];
+					if (!Array.isArray(v) || v.length === 0) continue;
+					const t0 = resolveChannel(v[0])?.type;
+					if (t0 !== 1 && t0 !== 3) continue;
+					if (!hideStats.listEl) {
+						const tt: any = type;
+						hideStats.listEl = `type=${tt?.displayName || tt?.name || typeof tt} prop=${k} len=${v.length} item0=${typeof v[0] === "string" ? "id" : "obj"} keys=[${Object.keys(props).slice(0, 16).join(",")}]`;
+					}
+					const filtered = v.filter((item: any) => !isBlockedDMChannel(resolveChannel(item)));
+					if (filtered.length !== v.length) {
+						hideStats.dmDataFiltered += v.length - filtered.length;
+						nextProps = nextProps ?? { ...props };
+						nextProps[k] = filtered;
+					}
+				}
+				if (nextProps) {
 					const next = args.slice();
-					next[1] = { ...props, data: filtered };
+					next[1] = nextProps;
 					return next;
 				}
 			}
