@@ -1,6 +1,53 @@
 import { React, ReactNative } from "@vendetta/metro/common";
 import { findByName, findByProps } from "@vendetta/metro";
+import { before } from "@vendetta/patcher";
 import { showToast } from "@vendetta/ui/toasts";
+
+// One-time, read-only capture of a real message-row object from RowManager. To
+// hide a message cleanly we need to drop it where the row is *generated* (so no
+// skeleton/placeholder is left behind), and for that we need the row's shape on
+// this Discord build. The probe hooks generate, records the first row's keys,
+// and then just early-returns on every later call. It never modifies the row.
+let capturedRow: string | null = null;
+let rowProbeUnpatch: (() => void) | null = null;
+
+export function installRowProbe(): void {
+	if (rowProbeUnpatch) return;
+	try {
+		const RowManager: any = findByName("RowManager");
+		const proto = RowManager?.prototype;
+		if (typeof proto?.generate !== "function") {
+			capturedRow = "RowManager.generate not found";
+			return;
+		}
+		rowProbeUnpatch = before("generate", proto, (args: any[]) => {
+			if (capturedRow) return;
+			try {
+				const row = args?.[0];
+				if (!row) return;
+				const msg = row.message;
+				capturedRow = [
+					`rowType=${row.rowType} rowKeys=[${Object.keys(row).slice(0, 24).join(",")}]`,
+					`messageKeys=[${msg ? Object.keys(msg).slice(0, 32).join(",") : "-"}]`,
+					`authorId=${msg?.authorId ?? msg?.author?.id ?? "-"}`,
+				].join("\n    ");
+			} catch {
+				/* ignore */
+			}
+		});
+	} catch (e) {
+		capturedRow = `row probe err ${(e as Error).message}`;
+	}
+}
+
+export function removeRowProbe(): void {
+	try {
+		rowProbeUnpatch?.();
+	} catch {
+		/* ignore */
+	}
+	rowProbeUnpatch = null;
+}
 
 // Report the shape of the runtime objects QuickFormat needs to patch, so we can
 // figure out the correct binding without a full debug console. This is the
@@ -57,6 +104,13 @@ export function runDiagnostics(): string {
 	} catch (e) {
 		lines.push(`user-surface probe err ${(e as Error).message}`);
 	}
+
+	lines.push(
+		`sampleRow:\n    ${
+			capturedRow ??
+			"none yet — open a channel/DM containing a hidden user's message, then copy again"
+		}`,
+	);
 
 	return lines.join("\n");
 }
