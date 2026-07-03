@@ -221,11 +221,18 @@ function install(): void {
 	// blocked DM is a 1:1 DM (type 1) whose recipient is blocked.
 	if (blockedIds.size) {
 		try {
-			// getSortedPrivateChannels and getPrivateChannelIds live on separate
-			// modules, so resolve each independently (a combined findByProps returns
-			// nothing and silently attaches no filter).
-			const sortedStore: any = findByProps("getSortedPrivateChannels");
-			const idsStore: any = findByProps("getPrivateChannelIds");
+			// Resolve the sort store precisely by name (PrivateChannelSortStore
+			// carries both getters); fall back to per-method findByProps. The DM
+			// list subscribes to this store, so its getters are what we must filter.
+			const sortStore: any = findByStoreName("PrivateChannelSortStore");
+			const sortedStore: any =
+				typeof sortStore?.getSortedPrivateChannels === "function"
+					? sortStore
+					: findByProps("getSortedPrivateChannels");
+			const idsStore: any =
+				typeof sortStore?.getPrivateChannelIds === "function"
+					? sortStore
+					: findByProps("getPrivateChannelIds");
 			const ChannelStore: any =
 				findByStoreName("ChannelStore") ??
 				findByProps("getChannel", "getDMFromUserId") ??
