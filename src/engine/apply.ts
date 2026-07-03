@@ -1,5 +1,5 @@
 import { React } from "@vendetta/metro/common";
-import { findByName, findByProps } from "@vendetta/metro";
+import { findByName, findByProps, findByStoreName } from "@vendetta/metro";
 import { before, instead } from "@vendetta/patcher";
 
 import { getTarget } from "./targets";
@@ -161,38 +161,49 @@ function install(): void {
 		}
 	}
 
-	// Data-layer DM-list hide. Drop a blocked user's 1:1 DM from the sorted
-	// private-channel list so its row never renders. We return a filtered *copy*
-	// (never mutate the store's own array) and memoize on the input reference, so
-	// an unchanged list keeps a stable reference and doesn't thrash re-renders.
+	// Data-layer DM-list hide. The DM sidebar renders from
+	// PrivateChannelSortStore.getPrivateChannelIds() (a list of channel ids), so
+	// that's the getter we must filter to drop the row; we also filter
+	// getSortedPrivateChannels() (channel objects), which feeds search and the
+	// quick switcher. Each returns a filtered *copy* (never mutating the store's
+	// array) and returns the original array untouched when nothing matched. A
+	// blocked DM is a 1:1 DM (type 1) whose recipient is blocked.
 	if (blockedIds.size) {
 		try {
 			const store: any = findByProps("getSortedPrivateChannels", "getPrivateChannelIds");
+			const ChannelStore: any = findByStoreName("ChannelStore");
 			const isBlockedDM = (c: any): boolean =>
 				c?.type === 1 &&
 				Array.isArray(c.recipients) &&
 				c.recipients.some((r: any) => blockedIds.has(typeof r === "string" ? r : r?.id));
+
 			if (typeof store?.getSortedPrivateChannels === "function") {
-				let cacheIn: unknown = null;
-				let cacheOut: unknown = null;
 				patches.push(
-					instead(
-						"getSortedPrivateChannels",
-						store,
-						function (this: unknown, args: any[], orig: any) {
-							const list = orig.apply(this, args);
-							try {
-								if (!Array.isArray(list)) return list;
-								if (list === cacheIn) return cacheOut;
-								const filtered = list.filter((c) => !isBlockedDM(c));
-								cacheIn = list;
-								cacheOut = filtered.length === list.length ? list : filtered;
-								return cacheOut;
-							} catch {
-								return list;
-							}
-						},
-					),
+					instead("getSortedPrivateChannels", store, function (this: unknown, args: any[], orig: any) {
+						const list = orig.apply(this, args);
+						try {
+							if (!Array.isArray(list)) return list;
+							const filtered = list.filter((c) => !isBlockedDM(c));
+							return filtered.length === list.length ? list : filtered;
+						} catch {
+							return list;
+						}
+					}),
+				);
+			}
+
+			if (typeof store?.getPrivateChannelIds === "function") {
+				patches.push(
+					instead("getPrivateChannelIds", store, function (this: unknown, args: any[], orig: any) {
+						const ids = orig.apply(this, args);
+						try {
+							if (!Array.isArray(ids)) return ids;
+							const filtered = ids.filter((id: string) => !isBlockedDM(ChannelStore?.getChannel?.(id)));
+							return filtered.length === ids.length ? ids : filtered;
+						} catch {
+							return ids;
+						}
+					}),
 				);
 			}
 		} catch (e) {

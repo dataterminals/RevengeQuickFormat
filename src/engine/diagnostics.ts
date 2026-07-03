@@ -1,5 +1,5 @@
 import { React, ReactNative } from "@vendetta/metro/common";
-import { findByName, findByProps } from "@vendetta/metro";
+import { findByName, findByProps, findByStoreName } from "@vendetta/metro";
 import { before } from "@vendetta/patcher";
 import { showToast } from "@vendetta/ui/toasts";
 
@@ -8,7 +8,8 @@ import { showToast } from "@vendetta/ui/toasts";
 // skeleton/placeholder is left behind), and for that we need the row's shape on
 // this Discord build. The probe hooks generate, records the first row's keys,
 // and then just early-returns on every later call. It never modifies the row.
-let capturedRow: string | null = null;
+const capturedRows: Record<string, string> = {};
+let rowProbeNote: string | null = null;
 let rowProbeUnpatch: (() => void) | null = null;
 
 export function installRowProbe(): void {
@@ -17,26 +18,29 @@ export function installRowProbe(): void {
 		const RowManager: any = findByName("RowManager");
 		const proto = RowManager?.prototype;
 		if (typeof proto?.generate !== "function") {
-			capturedRow = "RowManager.generate not found";
+			rowProbeNote = "RowManager.generate not found";
 			return;
 		}
+		// Capture one sample per rowType (message rows, and — if the member list
+		// runs through RowManager — member rows), so we can confirm where each
+		// surface's user id lives before patching it.
 		rowProbeUnpatch = before("generate", proto, (args: any[]) => {
-			if (capturedRow) return;
 			try {
 				const row = args?.[0];
 				if (!row) return;
+				const rt = String(row.rowType);
+				if (capturedRows[rt] || Object.keys(capturedRows).length >= 6) return;
 				const msg = row.message;
-				capturedRow = [
-					`rowType=${row.rowType} rowKeys=[${Object.keys(row).slice(0, 24).join(",")}]`,
-					`messageKeys=[${msg ? Object.keys(msg).slice(0, 32).join(",") : "-"}]`,
-					`authorId=${msg?.authorId ?? msg?.author?.id ?? "-"}`,
-				].join("\n    ");
+				capturedRows[rt] = [
+					`keys=[${Object.keys(row).slice(0, 20).join(",")}]`,
+					`user.id=${row.user?.id ?? "-"} userId=${row.userId ?? "-"} member.userId=${row.member?.userId ?? "-"} message.author.id=${msg?.author?.id ?? "-"}`,
+				].join(" | ");
 			} catch {
 				/* ignore */
 			}
 		});
 	} catch (e) {
-		capturedRow = `row probe err ${(e as Error).message}`;
+		rowProbeNote = `row probe err ${(e as Error).message}`;
 	}
 }
 
@@ -145,12 +149,33 @@ export function runDiagnostics(): string {
 		lines.push(`privateChannel probe err ${(e as Error).message}`);
 	}
 
-	lines.push(
-		`sampleRow:\n    ${
-			capturedRow ??
-			"none yet — open a channel/DM containing a hidden user's message, then copy again"
-		}`,
-	);
+	// Member-list store breadcrumb (the next surface to hide).
+	try {
+		const mls: any = findByStoreName("MemberListStore");
+		lines.push(
+			`MemberListStore=${
+				mls
+					? "fns:" +
+					  Object.keys(mls)
+							.filter((k) => typeof mls[k] === "function")
+							.slice(0, 12)
+							.join(",")
+					: "null"
+			}`,
+		);
+	} catch (e) {
+		lines.push(`MemberListStore err ${(e as Error).message}`);
+	}
+
+	const rowTypes = Object.keys(capturedRows);
+	if (rowProbeNote) {
+		lines.push(`rows: ${rowProbeNote}`);
+	} else if (!rowTypes.length) {
+		lines.push("rows: none captured yet — scroll a channel and open a member list, then copy again");
+	} else {
+		lines.push("rows (by rowType):");
+		for (const rt of rowTypes) lines.push(`  [${rt}] ${capturedRows[rt]}`);
+	}
 
 	return lines.join("\n");
 }
