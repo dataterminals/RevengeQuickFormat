@@ -3,6 +3,8 @@ import { findByName, findByProps, findByStoreName } from "@vendetta/metro";
 import { before } from "@vendetta/patcher";
 import { showToast } from "@vendetta/ui/toasts";
 
+import { hideStats } from "./apply";
+
 // One-time, read-only capture of a real message-row object from RowManager. To
 // hide a message cleanly we need to drop it where the row is *generated* (so no
 // skeleton/placeholder is left behind), and for that we need the row's shape on
@@ -166,6 +168,14 @@ export function runDiagnostics(): string {
 	} catch (e) {
 		lines.push(`MemberListStore err ${(e as Error).message}`);
 	}
+
+	// DM-hide runtime stats — did the filters run, and did they match?
+	lines.push(
+		`dmHide: channelStore=${hideStats.channelStoreOk} sorted=${hideStats.dmSortedIn}->${hideStats.dmSortedOut} ids=${hideStats.dmIdsIn}->${hideStats.dmIdsOut} idsResolved=${hideStats.dmIdsResolved}`,
+	);
+	lines.push(
+		`dmRowEl: ${hideStats.channelEl ?? "not captured — DM rows may render from an id, not a channel object"}`,
+	);
 
 	const rowTypes = Object.keys(capturedRows);
 	if (rowProbeNote) {

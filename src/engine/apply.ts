@@ -51,6 +51,18 @@ let blockedIds = new Set<string>();
 // installed element-creation patches
 let patches: Unpatch[] = [];
 
+// Runtime counters for the DM-list hide, surfaced in the diagnostics report so
+// we can see whether the filters actually run and match on-device (-1 = not run).
+export const hideStats = {
+	channelStoreOk: false,
+	dmSortedIn: -1,
+	dmSortedOut: -1,
+	dmIdsIn: -1,
+	dmIdsOut: -1,
+	dmIdsResolved: -1,
+	channelEl: null as string | null,
+};
+
 export interface ApplyResult {
 	applied: string[];
 	skipped: string[];
@@ -94,6 +106,18 @@ function hook(args: any[]): any[] | undefined {
 	try {
 		const type = args[0];
 		const props = args[1];
+
+		// Diagnostic: record the first element that carries a DM/group-channel
+		// object, so we can see what component renders a DM-list row and how.
+		if (!hideStats.channelEl && props?.channel?.recipients) {
+			try {
+				const t: any = type;
+				const name = t?.displayName || t?.name || (typeof t === "string" ? t : typeof t);
+				hideStats.channelEl = `type=${name} keys=[${Object.keys(props).slice(0, 16).join(",")}] ch.type=${props.channel.type} recip=${JSON.stringify(props.channel.recipients)?.slice(0, 50)}`;
+			} catch {
+				/* ignore */
+			}
+		}
 
 		// User targets: an element that belongs to a targeted user.
 		if (blockedIds.size) {
@@ -171,7 +195,11 @@ function install(): void {
 	if (blockedIds.size) {
 		try {
 			const store: any = findByProps("getSortedPrivateChannels", "getPrivateChannelIds");
-			const ChannelStore: any = findByStoreName("ChannelStore");
+			const ChannelStore: any =
+				findByStoreName("ChannelStore") ??
+				findByProps("getChannel", "getDMFromUserId") ??
+				findByProps("getChannel", "hasChannel");
+			hideStats.channelStoreOk = typeof ChannelStore?.getChannel === "function";
 			const isBlockedDM = (c: any): boolean =>
 				c?.type === 1 &&
 				Array.isArray(c.recipients) &&
@@ -184,6 +212,8 @@ function install(): void {
 						try {
 							if (!Array.isArray(list)) return list;
 							const filtered = list.filter((c) => !isBlockedDM(c));
+							hideStats.dmSortedIn = list.length;
+							hideStats.dmSortedOut = filtered.length;
 							return filtered.length === list.length ? list : filtered;
 						} catch {
 							return list;
@@ -198,7 +228,15 @@ function install(): void {
 						const ids = orig.apply(this, args);
 						try {
 							if (!Array.isArray(ids)) return ids;
-							const filtered = ids.filter((id: string) => !isBlockedDM(ChannelStore?.getChannel?.(id)));
+							let resolved = 0;
+							const filtered = ids.filter((id: string) => {
+								const ch = ChannelStore?.getChannel?.(id);
+								if (ch) resolved++;
+								return !isBlockedDM(ch);
+							});
+							hideStats.dmIdsIn = ids.length;
+							hideStats.dmIdsOut = filtered.length;
+							hideStats.dmIdsResolved = resolved;
 							return filtered.length === ids.length ? ids : filtered;
 						} catch {
 							return ids;
