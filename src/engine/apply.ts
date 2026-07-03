@@ -147,13 +147,18 @@ function hook(args: any[]): any[] | undefined {
 		}
 
 		if (blockedIds.size) {
-			// The DM list feeds its rows from a channel array held in *some* prop
-			// (the name varies by list component). Scan this composite element's
-			// array props; if one is a channel list, drop blocked DMs from it so the
-			// whole cell is removed (no clickable gap). Filters a copy onto a fresh
-			// props object — never mutating a shared array — and only when a blocked
-			// DM is actually present, so other elements pass through untouched.
-			if (typeof type !== "string" && props) {
+			// Remove blocked DMs from a channel array held in some prop of a list
+			// element (drops them from the quick switcher and any array-fed list).
+			// Gated to list elements (renderItem/getItemKey) to stay off the hot
+			// path. Note: the DM sidebar itself is an animated TransitionGroup whose
+			// removed rows linger for the exit animation, so this can't fully clear
+			// its cell — that's a known limitation. Filters a copy onto a fresh
+			// props object; only acts when a blocked DM is actually present.
+			if (
+				props &&
+				(typeof (props as any).renderItem === "function" ||
+					typeof (props as any).getItemKey === "function")
+			) {
 				let nextProps: any = null;
 				for (const k of Object.keys(props)) {
 					const v = (props as any)[k];
