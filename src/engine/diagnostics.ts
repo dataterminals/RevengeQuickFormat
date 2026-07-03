@@ -105,6 +105,46 @@ export function runDiagnostics(): string {
 		lines.push(`user-surface probe err ${(e as Error).message}`);
 	}
 
+	// DM / private-channel list breadcrumbs — to hide a blocked user's DM row at
+	// its data source (the way messages are hidden via RowManager), we need the
+	// store that provides the sorted DM list and how it stores recipients.
+	for (const name of [
+		"getSortedPrivateChannels",
+		"getPrivateChannelIds",
+		"getSortedPrivateChannelIds",
+		"getPrivateChannels",
+		"getDMFromUserId",
+	]) {
+		try {
+			const m: any = findByProps(name);
+			lines.push(
+				`${name}=${
+					m
+						? "fns:" +
+						  Object.keys(m)
+								.filter((k) => typeof m[k] === "function")
+								.slice(0, 12)
+								.join(",")
+						: "null"
+				}`,
+			);
+		} catch (e) {
+			lines.push(`${name} err ${(e as Error).message}`);
+		}
+	}
+	try {
+		const store: any = findByProps("getSortedPrivateChannels");
+		const list: any = store?.getSortedPrivateChannels?.();
+		const c = Array.isArray(list) ? list[0] : undefined;
+		lines.push(
+			c
+				? `privateChannel[0] keys=[${Object.keys(c).slice(0, 22).join(",")}] type=${c.type} recipients=${JSON.stringify(c.recipients ?? c.recipientIds ?? c.rawRecipients)?.slice(0, 80)}`
+				: `privateChannels=${Array.isArray(list) ? "empty" : typeof list}`,
+		);
+	} catch (e) {
+		lines.push(`privateChannel probe err ${(e as Error).message}`);
+	}
+
 	lines.push(
 		`sampleRow:\n    ${
 			capturedRow ??
