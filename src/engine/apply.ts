@@ -160,6 +160,45 @@ function install(): void {
 			console.warn("[QuickFormat] RowManager hide unavailable:", e);
 		}
 	}
+
+	// Data-layer DM-list hide. Drop a blocked user's 1:1 DM from the sorted
+	// private-channel list so its row never renders. We return a filtered *copy*
+	// (never mutate the store's own array) and memoize on the input reference, so
+	// an unchanged list keeps a stable reference and doesn't thrash re-renders.
+	if (blockedIds.size) {
+		try {
+			const store: any = findByProps("getSortedPrivateChannels", "getPrivateChannelIds");
+			const isBlockedDM = (c: any): boolean =>
+				c?.type === 1 &&
+				Array.isArray(c.recipients) &&
+				c.recipients.some((r: any) => blockedIds.has(typeof r === "string" ? r : r?.id));
+			if (typeof store?.getSortedPrivateChannels === "function") {
+				let cacheIn: unknown = null;
+				let cacheOut: unknown = null;
+				patches.push(
+					instead(
+						"getSortedPrivateChannels",
+						store,
+						function (this: unknown, args: any[], orig: any) {
+							const list = orig.apply(this, args);
+							try {
+								if (!Array.isArray(list)) return list;
+								if (list === cacheIn) return cacheOut;
+								const filtered = list.filter((c) => !isBlockedDM(c));
+								cacheIn = list;
+								cacheOut = filtered.length === list.length ? list : filtered;
+								return cacheOut;
+							} catch {
+								return list;
+							}
+						},
+					),
+				);
+			}
+		} catch (e) {
+			console.warn("[QuickFormat] DM-list hide unavailable:", e);
+		}
+	}
 }
 
 function uninstall(): void {
