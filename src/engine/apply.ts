@@ -55,6 +55,8 @@ let patches: Unpatch[] = [];
 // we can see whether the filters actually run and match on-device (-1 = not run).
 export const hideStats = {
 	channelStoreOk: false,
+	dmSortedPatched: false,
+	dmIdsPatched: false,
 	dmSortedIn: -1,
 	dmSortedOut: -1,
 	dmIdsIn: -1,
@@ -219,7 +221,11 @@ function install(): void {
 	// blocked DM is a 1:1 DM (type 1) whose recipient is blocked.
 	if (blockedIds.size) {
 		try {
-			const store: any = findByProps("getSortedPrivateChannels", "getPrivateChannelIds");
+			// getSortedPrivateChannels and getPrivateChannelIds live on separate
+			// modules, so resolve each independently (a combined findByProps returns
+			// nothing and silently attaches no filter).
+			const sortedStore: any = findByProps("getSortedPrivateChannels");
+			const idsStore: any = findByProps("getPrivateChannelIds");
 			const ChannelStore: any =
 				findByStoreName("ChannelStore") ??
 				findByProps("getChannel", "getDMFromUserId") ??
@@ -230,9 +236,10 @@ function install(): void {
 				Array.isArray(c.recipients) &&
 				c.recipients.some((r: any) => blockedIds.has(typeof r === "string" ? r : r?.id));
 
-			if (typeof store?.getSortedPrivateChannels === "function") {
+			if (typeof sortedStore?.getSortedPrivateChannels === "function") {
+				hideStats.dmSortedPatched = true;
 				patches.push(
-					instead("getSortedPrivateChannels", store, function (this: unknown, args: any[], orig: any) {
+					instead("getSortedPrivateChannels", sortedStore, function (this: unknown, args: any[], orig: any) {
 						const list = orig.apply(this, args);
 						try {
 							if (!Array.isArray(list)) return list;
@@ -247,9 +254,10 @@ function install(): void {
 				);
 			}
 
-			if (typeof store?.getPrivateChannelIds === "function") {
+			if (typeof idsStore?.getPrivateChannelIds === "function") {
+				hideStats.dmIdsPatched = true;
 				patches.push(
-					instead("getPrivateChannelIds", store, function (this: unknown, args: any[], orig: any) {
+					instead("getPrivateChannelIds", idsStore, function (this: unknown, args: any[], orig: any) {
 						const ids = orig.apply(this, args);
 						try {
 							if (!Array.isArray(ids)) return ids;
