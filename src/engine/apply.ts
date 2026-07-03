@@ -63,6 +63,7 @@ export const hideStats = {
 	dmIdsOut: -1,
 	dmIdsResolved: -1,
 	dmRowHidden: 0,
+	dmDataFiltered: 0,
 	channelEl: null as string | null,
 };
 
@@ -70,6 +71,40 @@ export const hideStats = {
 // that are keyed (DM-list rows keyed by channel id), where the swap is constant
 // per key and so can't change a component's hook count across renders.
 const HIDDEN = () => null;
+
+// ChannelStore reference (set during install) so the element hook can resolve a
+// channel id to its channel object while filtering a list's data.
+let channelStoreRef: any = null;
+
+function isBlockedDMChannel(ch: any): boolean {
+	return (
+		ch?.type === 1 &&
+		Array.isArray(ch.recipients) &&
+		ch.recipients.some((r: any) => blockedIds.has(typeof r === "string" ? r : r?.id))
+	);
+}
+
+function resolveChannel(item: any): any {
+	if (typeof item === "string") return channelStoreRef?.getChannel?.(item);
+	return item?.channel ?? item;
+}
+
+// If `data` is a channel list containing blocked DMs, return it with those
+// removed; otherwise null (leave it untouched). Cheap-gated on the first few
+// items so non-channel lists — e.g. the message list — aren't scanned in full.
+function filterChannelData(data: any[]): any[] | null {
+	let looksLikeChannels = false;
+	for (let i = 0; i < Math.min(3, data.length); i++) {
+		const t = resolveChannel(data[i])?.type;
+		if (t === 1 || t === 3) {
+			looksLikeChannels = true;
+			break;
+		}
+	}
+	if (!looksLikeChannels) return null;
+	const filtered = data.filter((item) => !isBlockedDMChannel(resolveChannel(item)));
+	return filtered.length === data.length ? null : filtered;
+}
 
 export interface ApplyResult {
 	applied: string[];
@@ -128,19 +163,26 @@ function hook(args: any[]): any[] | undefined {
 		}
 
 		if (blockedIds.size) {
-			// DM-list row — keyed by channel id, so replacing it with a
+			// DM list is a data-driven list: remove blocked DMs from its `data`
+			// array so the whole cell disappears (no clickable gap), whatever store
+			// feeds it. No-op for other lists; returns original props otherwise.
+			const data = props?.data;
+			if (Array.isArray(data) && data.length && typeof props.renderItem === "function") {
+				const filtered = filterChannelData(data);
+				if (filtered) {
+					hideStats.dmDataFiltered += data.length - filtered.length;
+					const next = args.slice();
+					next[1] = { ...props, data: filtered };
+					return next;
+				}
+			}
+
+			// DM-list row backstop — keyed by channel id, so replacing it with a
 			// render-nothing component is safe (constant per key). Gated on the
 			// row-only channelSelected/hasUnreadMessages props so we never touch the
 			// DM *screen* header/input, whose hook count would flip on navigation.
 			const ch = props?.channel;
-			if (
-				ch &&
-				ch.type === 1 &&
-				"channelSelected" in props &&
-				"hasUnreadMessages" in props &&
-				Array.isArray(ch.recipients) &&
-				ch.recipients.some((r: any) => blockedIds.has(typeof r === "string" ? r : r?.id))
-			) {
+			if (ch && "channelSelected" in props && "hasUnreadMessages" in props && isBlockedDMChannel(ch)) {
 				hideStats.dmRowHidden++;
 				const next = args.slice();
 				next[0] = HIDDEN;
@@ -237,6 +279,7 @@ function install(): void {
 				findByStoreName("ChannelStore") ??
 				findByProps("getChannel", "getDMFromUserId") ??
 				findByProps("getChannel", "hasChannel");
+			channelStoreRef = ChannelStore;
 			hideStats.channelStoreOk = typeof ChannelStore?.getChannel === "function";
 			const isBlockedDM = (c: any): boolean =>
 				c?.type === 1 &&
