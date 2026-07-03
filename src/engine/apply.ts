@@ -12,7 +12,8 @@ import type { Sheet, StyleObject, Unpatch } from "../types";
 // React 19 dropped forwardRef for many RN primitives, so Text/TextInput are now
 // plain function components with no patchable `render`. Instead of patching each
 // component, we patch React's element-creation path once (createElement plus the
-// automatic `jsx`/`jsxs` runtime) and rewrite elements as they're created.
+// automatic `jsx`/`jsxs` runtime) and merge a style into elements as they're
+// created.
 //
 // Two kinds of override are applied in that one hook:
 //
@@ -21,12 +22,18 @@ import type { Sheet, StyleObject, Unpatch } from "../types";
 //     a single React Native module instance, the reference we resolve is the
 //     same one Discord renders with, so the match hits Discord's own elements.
 //
-//   • user targets — keyed by a Discord user id. Any element that belongs to
-//     that user (its props carry the author/user id, or an avatar URL with that
-//     id) gets the style. A style of { display: "none" } hides the element
-//     outright: the mobile stand-in for the desktop QuickCSS
-//     `:has([src*='<id>']) { display: none }`. Matching the real id lets us hide
-//     a whole message/member row, not just the avatar.
+//   • user targets — keyed by a Discord user id. An element that belongs to that
+//     user (a message row, matched by the real author id, or an avatar image,
+//     matched by its URL) gets the style merged in. A style of { display: "none" }
+//     drops it from React Native's layout — the mobile stand-in for the desktop
+//     `:has([src*='<id>']) { display: none }`, and because layout collapses there
+//     is no leftover gap.
+//
+// We always *merge a style*, never replace the component. Swapping a hook-using
+// component for a render-nothing one changes React's hook count at that tree
+// position and throws "rendered fewer hooks than expected" — which froze the app
+// after opening a hidden user's DM. Merging a style keeps the element mounted
+// (its hooks/effects/subscriptions intact) and simply hides it.
 // ---------------------------------------------------------------------------
 
 // component reference -> styles to inject onto it
@@ -38,20 +45,10 @@ let blockedIds = new Set<string>();
 // installed element-creation patches
 let patches: Unpatch[] = [];
 
-// A stable component that renders nothing. Swapping an element's `type` to this
-// is a definitive hide that works even when the element ignores `style` — which
-// row and list-item containers often do. Module-level so its identity is stable
-// across renders and React doesn't remount every frame.
-const HIDDEN = () => null;
-
 export interface ApplyResult {
 	applied: string[];
 	skipped: string[];
 	failed: { key: string; reason: string }[];
-}
-
-function isHide(style: StyleObject): boolean {
-	return (style as { display?: unknown }).display === "none";
 }
 
 // Merge styles into a props object, appending last so they win on conflict.
@@ -62,34 +59,33 @@ function mergeStyle(props: any, styles: StyleObject[]): any {
 
 // spitroast `before` hook: element-creation calls look like (type, props, ...).
 // Returning a new args array replaces the arguments; returning nothing leaves
-// them untouched.
+// them untouched. Wrapped so a matching error can never escape into a render.
 function hook(args: any[]): any[] | undefined {
 	if (!args?.length) return;
-	const type = args[0];
-	const props = args[1];
+	try {
+		const type = args[0];
+		const props = args[1];
 
-	// User targets first: does this element belong to a targeted user?
-	if (blockedIds.size) {
-		const uid = findBlockedUserId(props, blockedIds);
-		if (uid) {
-			const style = userOverrides.get(uid)!;
+		// User targets: an element that belongs to a targeted user.
+		if (blockedIds.size) {
+			const uid = findBlockedUserId(props, blockedIds);
+			if (uid) {
+				const next = args.slice();
+				next[1] = mergeStyle(props, [userOverrides.get(uid)!]);
+				return next;
+			}
+		}
+
+		// Element targets: a component we style wholesale.
+		const styles = componentOverrides.get(type);
+		if (styles) {
 			const next = args.slice();
-			// Hide by replacing the component with one that renders nothing
-			// (keeps props/key intact); otherwise merge the style in.
-			if (isHide(style)) next[0] = HIDDEN;
-			else next[1] = mergeStyle(props, [style]);
+			next[1] = mergeStyle(props, styles);
 			return next;
 		}
+	} catch {
+		// Never let a matching error break Discord's render.
 	}
-
-	// Element targets: is this one of the components we style wholesale?
-	const styles = componentOverrides.get(type);
-	if (styles) {
-		const next = args.slice();
-		next[1] = mergeStyle(props, styles);
-		return next;
-	}
-
 	return;
 }
 
