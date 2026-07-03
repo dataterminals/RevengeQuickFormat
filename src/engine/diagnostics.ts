@@ -171,7 +171,7 @@ export function runDiagnostics(): string {
 
 	// DM-hide runtime stats — did the filters run, and did they match?
 	lines.push(
-		`dmHide: channelStore=${hideStats.channelStoreOk} sorted=${hideStats.dmSortedIn}->${hideStats.dmSortedOut} ids=${hideStats.dmIdsIn}->${hideStats.dmIdsOut} idsResolved=${hideStats.dmIdsResolved}`,
+		`dmHide: channelStore=${hideStats.channelStoreOk} sorted=${hideStats.dmSortedIn}->${hideStats.dmSortedOut} ids=${hideStats.dmIdsIn}->${hideStats.dmIdsOut} idsResolved=${hideStats.dmIdsResolved} rowsHidden=${hideStats.dmRowHidden}`,
 	);
 	lines.push(
 		`dmRowEl: ${hideStats.channelEl ?? "not captured — DM rows may render from an id, not a channel object"}`,

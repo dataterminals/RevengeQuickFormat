@@ -60,8 +60,14 @@ export const hideStats = {
 	dmIdsIn: -1,
 	dmIdsOut: -1,
 	dmIdsResolved: -1,
+	dmRowHidden: 0,
 	channelEl: null as string | null,
 };
+
+// A stable component that renders nothing. Only ever swapped in for elements
+// that are keyed (DM-list rows keyed by channel id), where the swap is constant
+// per key and so can't change a component's hook count across renders.
+const HIDDEN = () => null;
 
 export interface ApplyResult {
 	applied: string[];
@@ -119,8 +125,27 @@ function hook(args: any[]): any[] | undefined {
 			}
 		}
 
-		// User targets: an element that belongs to a targeted user.
 		if (blockedIds.size) {
+			// DM-list row — keyed by channel id, so replacing it with a
+			// render-nothing component is safe (constant per key). Gated on the
+			// row-only channelSelected/hasUnreadMessages props so we never touch the
+			// DM *screen* header/input, whose hook count would flip on navigation.
+			const ch = props?.channel;
+			if (
+				ch &&
+				ch.type === 1 &&
+				"channelSelected" in props &&
+				"hasUnreadMessages" in props &&
+				Array.isArray(ch.recipients) &&
+				ch.recipients.some((r: any) => blockedIds.has(typeof r === "string" ? r : r?.id))
+			) {
+				hideStats.dmRowHidden++;
+				const next = args.slice();
+				next[0] = HIDDEN;
+				return next;
+			}
+
+			// User targets: an element that belongs to a targeted user.
 			const uid = findBlockedUserId(props, blockedIds);
 			if (uid) {
 				const next = args.slice();
