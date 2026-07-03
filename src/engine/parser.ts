@@ -1,4 +1,5 @@
 import { targets } from "./targets";
+import { parseUserTarget } from "./match";
 import type { ParseResult, Sheet, StyleObject } from "../types";
 
 // Strip `//` line comments and trailing commas so the sheet can be authored as
@@ -74,7 +75,7 @@ export function parseSheet(source: string): ParseResult {
 			errors.push(`"${key}": value must be a style object.`);
 			continue;
 		}
-		if (!knownKeys.has(key)) {
+		if (!knownKeys.has(key) && !parseUserTarget(key)) {
 			errors.push(`"${key}": unknown target (it will be ignored).`);
 			continue;
 		}

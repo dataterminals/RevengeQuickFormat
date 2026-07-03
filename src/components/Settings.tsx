@@ -139,6 +139,12 @@ export default function Settings() {
 						}`}
 					/>
 				))}
+				<FormRow
+					label="Per-user"
+					subLabel={
+						'"user:<id>" — style everything from one user; { "display": "none" } hides them.'
+					}
+				/>
 			</FormSection>
 			<FormDivider />
 

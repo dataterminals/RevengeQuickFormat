@@ -3,11 +3,13 @@
 // which props are meaningful.
 export type StyleObject = Record<string, unknown>;
 
-// A parsed QuickFormat sheet: a map of target key -> style overrides.
+// A parsed QuickFormat sheet: a map of target key -> style overrides. A key is
+// either an element target (e.g. "text") or a user target ("user:<id>"), which
+// styles everything belonging to that user — { "display": "none" } hides them.
 //
 //   {
-//     "messageText": { "fontSize": 18, "fontWeight": "600" },
-//     "chatInput":   { "backgroundColor": "#111318" }
+//     "text":                       { "fontSize": 18, "fontWeight": "600" },
+//     "user:240617625594494977":    { "display": "none" }
 //   }
 export type Sheet = Record<string, StyleObject>;
 

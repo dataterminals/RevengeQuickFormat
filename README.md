@@ -55,6 +55,34 @@ Style keys and values are standard React Native style props — e.g. `color`,
 `backgroundColor`, `fontSize`, `fontWeight`, `borderRadius`, `padding`,
 `opacity`. Colors accept hex strings.
 
+### User targets
+
+Besides the named element targets, a key of the form `user:<id>` targets
+**everything belonging to one Discord user** — their messages, their member-list
+row, their avatar, mention rows, and so on — and applies the style wherever that
+user's content appears:
+
+```jsonc
+{
+  // Hide a user everywhere (messages, member list, avatar, …)
+  "user:240617625594494977": { "display": "none" },
+
+  // …or just restyle them
+  "user:1273866098722471969": { "opacity": 0.4 }
+}
+```
+
+This is the mobile counterpart to the desktop QuickCSS pattern
+`:has([src*='<id>']) { display: none }`. React Native has no selectors, so rather
+than scraping avatar URLs, QuickFormat matches the user's **real id** on the
+component that renders their content (falling back to the avatar URL when that's
+all that's exposed). A style of `{ "display": "none" }` removes the element
+outright; any other style simply restyles it.
+
+> Which surfaces respond depends on what a given Discord build exposes in its
+> component props — message rows and avatars are the most reliable. If a surface
+> isn't responding, use **Copy runtime diagnostics** so the bindings can be tuned.
+
 ## Targets
 
 Because there are no selectors, each styleable element is a hand-written

@@ -3,6 +3,7 @@ import { findByProps } from "@vendetta/metro";
 import { before } from "@vendetta/patcher";
 
 import { getTarget } from "./targets";
+import { findBlockedUserId, parseUserTarget } from "./match";
 import type { Sheet, StyleObject, Unpatch } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -11,18 +12,37 @@ import type { Sheet, StyleObject, Unpatch } from "../types";
 // React 19 dropped forwardRef for many RN primitives, so Text/TextInput are now
 // plain function components with no patchable `render`. Instead of patching each
 // component, we patch React's element-creation path once (createElement plus the
-// automatic `jsx`/`jsxs` runtime) and, whenever an element's `type` matches a
-// component we have overrides for, we merge the style into its props.
+// automatic `jsx`/`jsxs` runtime) and rewrite elements as they're created.
 //
-// Because there's a single React Native module instance, the component we
-// resolve from `ReactNative.Text` is the very same reference Discord renders
-// with, so the `type === component` match hits Discord's own elements.
+// Two kinds of override are applied in that one hook:
+//
+//   • element targets — keyed by a component reference (e.g. RN.Text). Every
+//     element of that exact component gets the style merged in. Because there's
+//     a single React Native module instance, the reference we resolve is the
+//     same one Discord renders with, so the match hits Discord's own elements.
+//
+//   • user targets — keyed by a Discord user id. Any element that belongs to
+//     that user (its props carry the author/user id, or an avatar URL with that
+//     id) gets the style. A style of { display: "none" } hides the element
+//     outright: the mobile stand-in for the desktop QuickCSS
+//     `:has([src*='<id>']) { display: none }`. Matching the real id lets us hide
+//     a whole message/member row, not just the avatar.
 // ---------------------------------------------------------------------------
 
 // component reference -> styles to inject onto it
-let overrides = new Map<unknown, StyleObject[]>();
+let componentOverrides = new Map<unknown, StyleObject[]>();
+// user id -> style to inject onto anything belonging to that user
+let userOverrides = new Map<string, StyleObject>();
+// key set of userOverrides, for a cheap size check in the hot path
+let blockedIds = new Set<string>();
 // installed element-creation patches
 let patches: Unpatch[] = [];
+
+// A stable component that renders nothing. Swapping an element's `type` to this
+// is a definitive hide that works even when the element ignores `style` — which
+// row and list-item containers often do. Module-level so its identity is stable
+// across renders and React doesn't remount every frame.
+const HIDDEN = () => null;
 
 export interface ApplyResult {
 	applied: string[];
@@ -30,10 +50,12 @@ export interface ApplyResult {
 	failed: { key: string; reason: string }[];
 }
 
-// Merge our styles into a props object, appending last so they win on conflict.
-function withOverride(type: unknown, props: any): any {
-	const styles = overrides.get(type);
-	if (!styles) return props;
+function isHide(style: StyleObject): boolean {
+	return (style as { display?: unknown }).display === "none";
+}
+
+// Merge styles into a props object, appending last so they win on conflict.
+function mergeStyle(props: any, styles: StyleObject[]): any {
 	const base = props ?? {};
 	return { ...base, style: [base.style, ...styles] };
 }
@@ -44,10 +66,31 @@ function withOverride(type: unknown, props: any): any {
 function hook(args: any[]): any[] | undefined {
 	if (!args?.length) return;
 	const type = args[0];
-	if (!overrides.has(type)) return;
-	const next = args.slice();
-	next[1] = withOverride(type, args[1]);
-	return next;
+	const props = args[1];
+
+	// User targets first: does this element belong to a targeted user?
+	if (blockedIds.size) {
+		const uid = findBlockedUserId(props, blockedIds);
+		if (uid) {
+			const style = userOverrides.get(uid)!;
+			const next = args.slice();
+			// Hide by replacing the component with one that renders nothing
+			// (keeps props/key intact); otherwise merge the style in.
+			if (isHide(style)) next[0] = HIDDEN;
+			else next[1] = mergeStyle(props, [style]);
+			return next;
+		}
+	}
+
+	// Element targets: is this one of the components we style wholesale?
+	const styles = componentOverrides.get(type);
+	if (styles) {
+		const next = args.slice();
+		next[1] = mergeStyle(props, styles);
+		return next;
+	}
+
+	return;
 }
 
 function install(): void {
@@ -77,16 +120,29 @@ function uninstall(): void {
 
 // Revert every applied override.
 export function clear(): void {
-	overrides = new Map();
+	componentOverrides = new Map();
+	userOverrides = new Map();
+	blockedIds = new Set();
 	uninstall();
 }
 
 // Apply a parsed sheet. Safe to call repeatedly.
 export function applySheet(sheet: Sheet): ApplyResult {
-	overrides = new Map();
+	componentOverrides = new Map();
+	userOverrides = new Map();
+	blockedIds = new Set();
 	const result: ApplyResult = { applied: [], skipped: [], failed: [] };
 
 	for (const [key, style] of Object.entries(sheet)) {
+		// user:<id> target — no component to resolve, so it always "applies".
+		const userId = parseUserTarget(key);
+		if (userId) {
+			userOverrides.set(userId, style);
+			blockedIds.add(userId);
+			result.applied.push(key);
+			continue;
+		}
+
 		const target = getTarget(key);
 		if (!target) {
 			result.skipped.push(key);
@@ -95,16 +151,16 @@ export function applySheet(sheet: Sheet): ApplyResult {
 		try {
 			const component = target.resolve();
 			if (!component) throw new Error(`component for "${key}" not found`);
-			const arr = overrides.get(component) ?? [];
+			const arr = componentOverrides.get(component) ?? [];
 			arr.push(style);
-			overrides.set(component, arr);
+			componentOverrides.set(component, arr);
 			result.applied.push(key);
 		} catch (e) {
 			result.failed.push({ key, reason: (e as Error).message });
 		}
 	}
 
-	if (overrides.size > 0) install();
+	if (componentOverrides.size > 0 || userOverrides.size > 0) install();
 	else uninstall();
 
 	return result;

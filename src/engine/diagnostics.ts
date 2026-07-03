@@ -1,5 +1,5 @@
 import { React, ReactNative } from "@vendetta/metro/common";
-import { findByProps } from "@vendetta/metro";
+import { findByName, findByProps } from "@vendetta/metro";
 import { showToast } from "@vendetta/ui/toasts";
 
 // Report the shape of the runtime objects QuickFormat needs to patch, so we can
@@ -42,6 +42,20 @@ export function runDiagnostics(): string {
 		if (p?.Text) lines.push(probe("  ↳ .Text", p.Text));
 	} catch (e) {
 		lines.push(`findByProps err ${(e as Error).message}`);
+	}
+
+	// Breadcrumbs for user-target surfaces. Prop-level matching (match.ts) is the
+	// primary path; these help if we need to bind a specific module instead —
+	// e.g. the message-row builder or the avatar-URL helper.
+	try {
+		const rm: any = findByName("RowManager", false);
+		lines.push(`RowManager=${rm ? "found" : "null"}`);
+		const av: any = findByProps("getUserAvatarURL");
+		lines.push(
+			`avatarUtils=${av ? "found keys:" + Object.keys(av).slice(0, 6).join(",") : "null"}`,
+		);
+	} catch (e) {
+		lines.push(`user-surface probe err ${(e as Error).message}`);
 	}
 
 	return lines.join("\n");
