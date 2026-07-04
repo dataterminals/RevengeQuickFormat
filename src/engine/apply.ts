@@ -67,6 +67,8 @@ export const hideStats = {
 	channelEl: null as string | null,
 	listEl: null as string | null,
 	userEls: [] as string[],
+	rowComponentsFound: 0,
+	memberRowsHidden: 0,
 };
 
 // A stable component that renders nothing. Only ever swapped in for elements
@@ -77,6 +79,12 @@ const HIDDEN = () => null;
 // ChannelStore reference (set during install) so the element hook can resolve a
 // channel id to its channel object while filtering a list's data.
 let channelStoreRef: any = null;
+
+// Resolved shared user-row component(s) — the member list, search results and
+// friends list all render user entries through these. An element of one of them
+// for a blocked user is swapped for a render-nothing component. Rows are keyed,
+// so a constant-per-key swap can't change any component's hook count (freeze-safe).
+let rowComponents = new Set<unknown>();
 
 function isBlockedDMChannel(ch: any): boolean {
 	return (
@@ -149,13 +157,16 @@ function hook(args: any[]): any[] | undefined {
 
 		// Diagnostic: record a few distinct user-bearing element shapes, to locate
 		// the member-list row (populated once a server member list is open).
-		if ((props?.user?.id || props?.member) && hideStats.userEls.length < 16) {
+		if ((props?.user?.id || props?.member) && hideStats.userEls.length < 24) {
 			try {
 				const t: any = type;
 				const name = t?.displayName || t?.name || (typeof t === "string" ? t : typeof t);
-				if (!hideStats.userEls.some((s) => s.startsWith(`type=${name} `))) {
+				const noise =
+					typeof name === "string" && (name.startsWith("UserProfile") || name.startsWith("You"));
+				if (!noise && !hideStats.userEls.some((s) => s.startsWith(`type=${name} `))) {
 					const uid = props.user?.id ?? props.member?.userId ?? props.member?.user?.id ?? "?";
-					hideStats.userEls.push(`type=${name} keys=[${Object.keys(props).slice(0, 12).join(",")}] uid=${uid}`);
+					const flags = `${typeof props.onPress === "function" ? "onPress " : ""}${props.guildId ? "guild " : ""}`;
+					hideStats.userEls.push(`type=${name} ${flags}keys=[${Object.keys(props).slice(0, 12).join(",")}] uid=${uid}`);
 				}
 			} catch {
 				/* ignore */
@@ -163,6 +174,19 @@ function hook(args: any[]): any[] | undefined {
 		}
 
 		if (blockedIds.size) {
+			// Shared user row (member list / search results / friends list): drop a
+			// blocked user's whole row. Rows are keyed, so the null swap is freeze-safe.
+			if (rowComponents.has(type)) {
+				const uid =
+					props?.user?.id ?? props?.userId ?? props?.member?.userId ?? props?.member?.user?.id;
+				if (typeof uid === "string" && blockedIds.has(uid)) {
+					hideStats.memberRowsHidden++;
+					const next = args.slice();
+					next[0] = HIDDEN;
+					return next;
+				}
+			}
+
 			// Remove blocked DMs from a channel array held in some prop of a list
 			// element (drops them from the quick switcher and any array-fed list).
 			// Gated to list elements (renderItem/getItemKey) to stay off the hot
@@ -353,6 +377,23 @@ function install(): void {
 			console.warn("[QuickFormat] DM-list hide unavailable:", e);
 		}
 	}
+
+	// Resolve the shared user-row component(s) so we can drop a blocked user's row
+	// from the member list, search results and friends list in one place.
+	if (blockedIds.size) {
+		try {
+			rowComponents = new Set();
+			const add = (c: any) => {
+				if (c && (typeof c === "function" || typeof c === "object")) rowComponents.add(c);
+			};
+			add(findByName("UserRow"));
+			const sub: any = findByProps("UserRowSubLabel");
+			if (sub?.UserRow) add(sub.UserRow);
+			hideStats.rowComponentsFound = rowComponents.size;
+		} catch (e) {
+			console.warn("[QuickFormat] UserRow resolve failed:", e);
+		}
+	}
 }
 
 function uninstall(): void {
@@ -370,6 +411,7 @@ export function clear(): void {
 	componentOverrides = new Map();
 	userOverrides = new Map();
 	blockedIds = new Set();
+	rowComponents = new Set();
 	uninstall();
 }
 
