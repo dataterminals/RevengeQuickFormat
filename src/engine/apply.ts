@@ -149,7 +149,7 @@ function hook(args: any[]): any[] | undefined {
 
 		// Diagnostic: record a few distinct user-bearing element shapes, to locate
 		// the member-list row (populated once a server member list is open).
-		if ((props?.user?.id || props?.member) && hideStats.userEls.length < 5) {
+		if ((props?.user?.id || props?.member) && hideStats.userEls.length < 16) {
 			try {
 				const t: any = type;
 				const name = t?.displayName || t?.name || (typeof t === "string" ? t : typeof t);
