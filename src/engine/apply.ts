@@ -1,4 +1,4 @@
-import { React } from "@vendetta/metro/common";
+import { React, ReactNative } from "@vendetta/metro/common";
 import { findByName, findByProps, findByStoreName } from "@vendetta/metro";
 import { before, instead } from "@vendetta/patcher";
 
@@ -71,10 +71,16 @@ export const hideStats = {
 	memberRowsHidden: 0,
 };
 
-// A stable component that renders nothing. Only ever swapped in for elements
-// that are keyed (DM-list rows keyed by channel id), where the swap is constant
-// per key and so can't change a component's hook count across renders.
-const HIDDEN = () => null;
+// Swapped in for a blocked user's list row. Renders a transparent overlay that
+// claims tap touches (but yields to scrolling), so a leftover fixed-height cell
+// stays blank AND can't be tapped to open the hidden user — a stopgap for cells
+// the list won't collapse. Stable identity; only used for keyed rows, so the
+// swap is constant per key and can't change any component's hook count.
+const TOUCH_BLOCKER = (): any =>
+	React.createElement(ReactNative.View as any, {
+		style: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
+		onStartShouldSetResponder: () => true,
+	});
 
 // ChannelStore reference (set during install) so the element hook can resolve a
 // channel id to its channel object while filtering a list's data.
@@ -182,7 +188,7 @@ function hook(args: any[]): any[] | undefined {
 				if (typeof uid === "string" && blockedIds.has(uid)) {
 					hideStats.memberRowsHidden++;
 					const next = args.slice();
-					next[0] = HIDDEN;
+					next[0] = TOUCH_BLOCKER;
 					return next;
 				}
 			}
@@ -231,7 +237,7 @@ function hook(args: any[]): any[] | undefined {
 			if (ch && "channelSelected" in props && "hasUnreadMessages" in props && isBlockedDMChannel(ch)) {
 				hideStats.dmRowHidden++;
 				const next = args.slice();
-				next[0] = HIDDEN;
+				next[0] = TOUCH_BLOCKER;
 				return next;
 			}
 
