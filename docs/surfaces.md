@@ -119,6 +119,29 @@ An element-level `UserRow` swap can therefore only leave a blank 56px cell.
 Verified live on Discord 342.16: member removed, its group header went `8` → `7`,
 following sections still correct, no gap; back to `8` when the sheet is cleared.
 
+## "Happening Now" voice carousel
+
+The horizontal strip across the top of the Messages screen. A plain `data` array
+of `{ kind, userId, voiceState, guildId }` on a standard list
+(`data`/`renderItem`/`keyExtractor`), so a hidden user is simply filtered out.
+
+Verified live on Discord 342.16: the array reaching the list dropped to 62
+entries with the hidden user absent.
+
+## Search / people results
+
+The row is an **anonymous memo component whose props are exactly
+`{ user, onPress }`**, so it is matched on that shape rather than by name. No
+`record` prop exists on this build — the older `row.record.id` note is stale.
+
+No filterable array was found feeding these results, so the row is swapped for a
+render-nothing component rather than removed from a data source. Rows are keyed,
+so a constant-per-key swap cannot shift any component's hook count.
+
+> **Unverified.** The shape was captured live, but the hide itself was never
+> confirmed on screen — the app kept restoring into a DM conversation instead of
+> the search screen. Whether the collapsed row leaves a gap is therefore unknown.
+
 ## Messages
 
 Unchanged and still the most reliable binding: `RowManager.prototype.generate`,

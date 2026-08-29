@@ -314,6 +314,39 @@ function hook(args: any[]): any[] | undefined {
 				}
 			}
 
+			// "Happening Now" — the voice-activity carousel across the top of the
+			// Messages screen. Plain array of { kind, userId, voiceState, guildId },
+			// so a hidden user is simply dropped from it.
+			if (Array.isArray(props?.data) && props.data.length) {
+				const f = props.data[0];
+				if (f && typeof f === "object" && "kind" in f && "userId" in f && "voiceState" in f) {
+					const keep = props.data.filter((e: any) => !blockedIds.has(e?.userId));
+					if (keep.length !== props.data.length) {
+						const next = args.slice();
+						next[1] = { ...props, data: keep };
+						return next;
+					}
+				}
+			}
+
+			// Search / people results. The row is an anonymous memo component whose
+			// props are exactly { user, onPress }, so it is matched on that shape
+			// rather than by name. Rows are keyed, so a constant-per-key swap can't
+			// shift any component's hook count.
+			if (
+				props?.user?.id &&
+				typeof props.onPress === "function" &&
+				blockedIds.has(props.user.id)
+			) {
+				const keys = Object.keys(props);
+				if (keys.length === 2 && keys.includes("user") && keys.includes("onPress")) {
+					hideStats.memberRowsHidden++;
+					const next = args.slice();
+					next[0] = TOUCH_BLOCKER;
+					return next;
+				}
+			}
+
 			// The DM list itself. Its rows come from a single `data` object:
 			//
 			//   data = {
