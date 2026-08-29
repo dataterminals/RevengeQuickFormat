@@ -71,31 +71,53 @@ no data array at all. Its `renderItem` returns a plain `View` wrapper.
 ## Member list
 
 ```
-MembersScreen            { searchContext }
-SearchableMembersScreen  { searchContext, guildId }
-  └─ GuildChannelUserList { onUserPress, onUserLongPress, channelId, guildId,
-                            disableStickySections, listStyleOverride,
-                            isNameplatedList, canShowDisplayNameStylesFont }
-       └─ host:FastestList { sectionsVersioned, renderAhead,
-                             onVisibleItemsChanged, placeholderConfig, … }
-            └─ UserRow    { type, user, nickname, usernameColor, roleColors,
-                            isNameplatedRow, premiumSince, isOwner, guildId,
-                            canShowDisplayNameStylesFont, onPress, onLongPress,
-                            start, end }
-            └─ UserRowSubLabel { user, type, animate, isGameRelationship,
-                                 guildId, applicationId }
+MembersScreen → SearchableMembersScreen → GuildChannelUserList
+  → host:FastestList { sectionsVersioned, … }        (native)
+       → UserRow { type, user, nickname, usernameColor, roleColors,
+                   isNameplatedRow, premiumSince, isOwner, guildId,
+                   onPress, onLongPress, start, end }
 ```
 
-**`findByStoreName("MemberListStore")` returned null because the list is not
-driven by a JS store on this build.** The outer list is `host:FastestList` — a
-**native** host component fed `sectionsVersioned`. There is no JS-side array to
-filter, which is why both the store approach and the row-type approach came up
-empty.
+**Data source: `ChannelMemberStore`.** `MemberListStore` does not exist on this
+build, which is why the earlier lookup returned null. The current store exposes:
 
-`UserRow` is the tractable seam: it receives `user` directly, so `props.user.id`
-is the discriminator, and the row is a normal React element that can be styled
-or replaced. Note the member list did **not** appear as a `RowManager` rowType —
-that finding stands.
+```
+getProps(guildId, channelId) -> { listId, groups, rows, version }
+getRows (guildId, channelId) -> rows          // secondary accessor
+```
+
+`rows` is one flat array of `{ type: "GROUP" | "MEMBER", … }` — MEMBER entries
+carry `userId`, GROUP entries are section headers. `groups` describes each
+section as `{ id, title, count, index }`, where `count` is its member total and
+`index` is the position of its header **inside `rows`**.
+
+**The list reads `getProps`, not `getRows`.** Patching only `getRows` filters the
+array you get when you call it yourself and changes nothing on screen — verified
+the hard way.
+
+**What works** (`filterMemberRows` in `engine/apply.ts`) — three edits that must
+happen together:
+
+1. drop the MEMBER row,
+2. decrement its group's `count`,
+3. **re-index every group after it**, since the rows below shift up.
+
+Skip (3) and the sections point at the wrong rows. The same header objects appear
+in both `groups` and `rows`, so the rebuilt ones are substituted into both;
+originals are never mutated.
+
+Results are memoised in a `WeakMap` keyed on the object the store returned. The
+row array runs to tens of thousands of entries in a large guild and these are
+called on render, so a fresh array each call would both cost real time and
+re-render the list endlessly.
+
+**Nothing downstream is filterable.** The native `FastestList` is fed
+`sectionsVersioned`, which carries only per-section counts and sizes with
+`keysAreUniform: true` and `itemKeys` of `[""]` — no identities cross into JS.
+An element-level `UserRow` swap can therefore only leave a blank 56px cell.
+
+Verified live on Discord 342.16: member removed, its group header went `8` → `7`,
+following sections still correct, no gap; back to `8` when the sheet is cleared.
 
 ## Messages
 

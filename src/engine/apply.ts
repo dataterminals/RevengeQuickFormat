@@ -69,6 +69,8 @@ export const hideStats = {
 	userEls: [] as string[],
 	rowComponentsFound: 0,
 	memberRowsHidden: 0,
+	memberStorePatched: false,
+	memberStoreRemoved: 0,
 };
 
 // Swapped in for a blocked user's list row. Renders a transparent overlay that
@@ -153,6 +155,75 @@ function filterDMListData(data: any): any | null {
 	// old cell count and the row reappears as an empty gap.
 	next.dataKey = `${data.dataKey}-qf${keep.length}.${favKeep ? favKeep.length : 0}`;
 	return next;
+}
+
+// Filter the member list's row set.
+//
+// ChannelMemberStore.getProps(guildId, channelId) returns
+//   { listId, groups, rows, version }
+// where `rows` is one flat array of GROUP headers and MEMBER entries, and
+// `groups` describes each section as { id, title, count, index } — `count` being
+// the members in it and `index` the position of its header inside `rows`.
+//
+// Dropping a member therefore means three edits, not one: remove the row,
+// decrement its group's count, and re-index every group that sits after it.
+// Miss the last of those and the sections point at the wrong rows.
+//
+// Returns null when nothing was hidden, so callers can pass the original through.
+function filterMemberRows(rows: any[], groups: any[] | undefined) {
+	const kept: any[] = [];
+	const removedPerGroup = new Map<string, number>();
+	let currentGroup: string | null = null;
+	let removed = 0;
+
+	for (let i = 0; i < rows.length; i++) {
+		const r = rows[i];
+		if (r?.type === "GROUP") currentGroup = r.id;
+		if (r?.type === "MEMBER" && blockedIds.has(r.userId)) {
+			removed++;
+			if (currentGroup) {
+				removedPerGroup.set(currentGroup, (removedPerGroup.get(currentGroup) ?? 0) + 1);
+			}
+			continue;
+		}
+		kept.push(r);
+	}
+	if (!removed) return null;
+
+	// Rebuild only the groups that actually changed, as fresh objects — the
+	// originals belong to the store and must not be mutated.
+	let nextGroups = groups;
+	if (Array.isArray(groups)) {
+		const newIndex = new Map<string, number>();
+		for (let i = 0; i < kept.length; i++) {
+			const r = kept[i];
+			if (r?.type === "GROUP") newIndex.set(r.id, i);
+		}
+		const replaced = new Map<string, any>();
+		nextGroups = groups.map((g: any) => {
+			if (!g?.id) return g;
+			const lost = removedPerGroup.get(g.id) ?? 0;
+			const idx = newIndex.get(g.id);
+			const countChanged = lost > 0 && typeof g.count === "number";
+			const indexChanged = idx !== undefined && typeof g.index === "number" && idx !== g.index;
+			if (!countChanged && !indexChanged) return g;
+			const next = { ...g };
+			if (countChanged) next.count = Math.max(0, g.count - lost);
+			if (indexChanged) next.index = idx;
+			replaced.set(g.id, next);
+			return next;
+		});
+		// The same header objects appear inside `rows`; swap in the updated ones
+		// so the two views of a group cannot disagree.
+		if (replaced.size) {
+			for (let i = 0; i < kept.length; i++) {
+				const r = kept[i];
+				if (r?.type === "GROUP" && replaced.has(r.id)) kept[i] = replaced.get(r.id);
+			}
+		}
+	}
+
+	return { rows: kept, groups: nextGroups, removed };
 }
 
 export interface ApplyResult {
@@ -458,6 +529,82 @@ function install(): void {
 			}
 		} catch (e) {
 			console.warn("[QuickFormat] DM-list hide unavailable:", e);
+		}
+	}
+
+	// Member list, at the data layer. Rows come from
+	// ChannelMemberStore.getRows(guildId, channelId) as one flat array of
+	// { type: "GROUP" | "MEMBER", … }, where MEMBER rows carry `userId` and GROUP
+	// rows are section headers (no counts on them, so removing a member needs no
+	// bookkeeping elsewhere).
+	//
+	// This is the only place a member row can actually be *removed*. The list
+	// itself is a native component (`FastestList`) fed `sectionsVersioned`, which
+	// carries just per-section counts and sizes with uniform empty item keys —
+	// no identities cross into JS, so there is nothing to filter downstream and
+	// an element-level swap can only leave a blank 56px cell behind.
+	//
+	// `MemberListStore` does not exist on this build; `ChannelMemberStore` is its
+	// replacement, which is why the earlier lookup came back null.
+	if (blockedIds.size) {
+		try {
+			const ChannelMemberStore: any = findByStoreName("ChannelMemberStore");
+
+			// The list reads getProps (getRows is a secondary accessor), so both are
+			// patched — getProps is the one that actually changes what renders.
+			//
+			// Both are called on render over a row array that runs to tens of
+			// thousands of entries in a large guild, so results are memoised against
+			// the object the store handed us. That also keeps the returned identity
+			// stable; a fresh object every call would re-render the list forever.
+			if (typeof ChannelMemberStore?.getProps === "function") {
+				hideStats.memberStorePatched = true;
+				const propsCache = new WeakMap<object, any>();
+				patches.push(
+					instead("getProps", ChannelMemberStore, function (this: unknown, args: any[], orig: any) {
+						const props = orig.apply(this, args);
+						try {
+							if (!props || !Array.isArray(props.rows)) return props;
+							const cached = propsCache.get(props);
+							if (cached) return cached;
+
+							const next = filterMemberRows(props.rows, props.groups);
+							if (!next) {
+								propsCache.set(props, props);
+								return props;
+							}
+							hideStats.memberStoreRemoved += next.removed;
+							const out = { ...props, rows: next.rows, groups: next.groups };
+							propsCache.set(props, out);
+							return out;
+						} catch {
+							return props;
+						}
+					}),
+				);
+			}
+
+			if (typeof ChannelMemberStore?.getRows === "function") {
+				const rowsCache = new WeakMap<object, any[]>();
+				patches.push(
+					instead("getRows", ChannelMemberStore, function (this: unknown, args: any[], orig: any) {
+						const rows = orig.apply(this, args);
+						try {
+							if (!Array.isArray(rows)) return rows;
+							const cached = rowsCache.get(rows);
+							if (cached) return cached;
+							const next = filterMemberRows(rows, undefined);
+							const out = next ? next.rows : rows;
+							rowsCache.set(rows, out);
+							return out;
+						} catch {
+							return rows;
+						}
+					}),
+				);
+			}
+		} catch (e) {
+			console.warn("[QuickFormat] member-list hide unavailable:", e);
 		}
 	}
 
