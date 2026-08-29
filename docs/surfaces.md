@@ -11,42 +11,62 @@ prop carries the user id, and — importantly — why the earlier approach faile
 
 ## Direct-message list
 
-```
-FastList
-  └─ _FastListItemRenderer   { section, item, recyclerKey, fastListInstance, … }
-       └─ TransitionItem     { item, renderItem }
-            └─ MessagesItemChannelContent
-                 { channel, channelSelected, favorite, muted, ignored,
-                   blocked, hasActivity, hasUnreadMessages,
-                   resolvedUnreadSetting, hasNameplate }
-            └─ MessagesItemChannelAvatar
-                 { channel, channelSelected, hasUnreadMessages, muted,
-                   ignored, blocked, isStreaming, status }
-```
-
-**Why filtering never removed the row.** `FastList` has no data array. Its
-contract is:
+The list is a `React.memo` component with **no displayName**, identified by
+`listItemHeight` in its props. Everything it renders comes from one `data` object:
 
 ```
-sections   : number[]        // row COUNT per section, e.g. [1,1,0,2,0,7,…]
-sectionSize: (s) => number
-itemSize   : (s, r) => number
-renderItem : ({ section, row }) => element
-getRecyclerKey, getAnchorIdFromIndex, getAnchorIndexFromId, …
+data = {
+  channels:         [{ channelId, lastMessageId, isFavorite, isRequest }, …],
+  channelFavorites: [ … same shape … ],
+  sections:         number[],   // row COUNT per section, e.g. [1, 6, 0, 0, 0]
+  dataKey:          string,     // memoisation key, e.g. "20"
+  friendSuggestions, showFullscreenEmptyState, renderHeader, renderFooter,
+}
 ```
 
-Rows are addressed by `(section, row)` index, and the channel is resolved
-*inside* `renderItem`. So filtering `PrivateChannelSortStore.getPrivateChannelIds()`
-or hunting for a filterable array prop was always going to leave the cell in
-place — the count is what decides how many cells exist.
+Rows render through `AnimatedEnterExitItem { item, entering, exiting, renderItem }`
+into `MessagesItemChannelContent { channel, channelSelected, favorite, muted,
+ignored, blocked, hasActivity, hasUnreadMessages, resolvedUnreadSetting,
+hasNameplate }`.
 
-**What would actually work:** patch the DM `FastList`'s props to (a) decrement
-the affected `sections` count and (b) wrap `renderItem` so incoming row indices
-are remapped past hidden entries. Both must change together or the list renders
-the wrong channel in each slot.
+**Why the earlier attempts failed.** Two independent reasons:
 
-The user id is not on the row directly — `channel.recipients` holds id strings,
-and a DM is `channel.type === 1`.
+1. `PrivateChannelSortStore.getPrivateChannelIds()` is not what this list reads.
+   Filtering it changed nothing, which matches the 8→7 filter that the sidebar
+   ignored.
+2. The plugin's generic "filter any channel array on a list element" pass was
+   gated on `renderItem`/`getItemKey` being in props. This component has
+   **neither** — its rows come from `data` — so the element was never examined.
+
+**What works** (implemented in `engine/apply.ts` as `filterDMListData`): filter
+`data.channels` and `data.channelFavorites`, *and* fix up `data.sections`, *and*
+change `data.dataKey`. All three must move together:
+
+- `sections` holds the row **count** per section and is what decides how many
+  cells exist — filtering the array alone leaves an empty, tappable cell, which
+  is exactly the symptom reported before.
+- `dataKey` memoises the computed layout; without a new value the list reuses the
+  old cell count.
+
+Entries carry only a `channelId`, so the channel is resolved via `ChannelStore`
+to test `type === 1` and its `recipients`.
+
+The DM section is located by **value** — the section whose count equals the
+channel-array length — rather than a fixed index, because the section layout
+shifts with the favourites row and friend-suggestion block.
+
+Verified live on Discord 342.16: 6 DM rows → 5 with one user hidden, no gap and
+no leftover tappable cell; back to 6 when the sheet is cleared. Note that
+*removing* a hide needs an app restart before the row returns, because the list
+memoises its layout — a plugin restart alone is not enough.
+
+Note the `FastList` described below is the **guild channel list**, not this one.
+
+### Guild channel list (a different list)
+
+`FastList { sections: number[], sectionSize, itemSize, renderItem({section,row}),
+getRecyclerKey, getAnchorIdFromIndex, … }` — addressed by `(section, row)` with
+no data array at all. Its `renderItem` returns a plain `View` wrapper.
 
 ## Member list
 

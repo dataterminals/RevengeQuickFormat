@@ -105,6 +105,56 @@ function resolveChannel(item: any): any {
 	return item?.channel ?? item;
 }
 
+// Filter the DM list's `data` object, keeping `sections` and `dataKey` in step.
+// Returns null when nothing was hidden, so the caller can leave props untouched.
+//
+// `sections` holds a row count per section; the section that lists DMs is the
+// one whose count equals the channel-array length. That is matched by value
+// rather than by a fixed index, because the section layout shifts with things
+// like the favourites row and the friend-suggestion block being present or not.
+function filterDMListData(data: any): any | null {
+	const channels: any[] = data.channels;
+	const keep = channels.filter(
+		(c) => !isBlockedDMChannel(channelStoreRef?.getChannel?.(c?.channelId)),
+	);
+	const favs: any[] | null = Array.isArray(data.channelFavorites) ? data.channelFavorites : null;
+	const favKeep = favs
+		? favs.filter((c) => !isBlockedDMChannel(channelStoreRef?.getChannel?.(c?.channelId)))
+		: null;
+
+	const channelsChanged = keep.length !== channels.length;
+	const favsChanged = !!favs && !!favKeep && favKeep.length !== favs.length;
+	if (!channelsChanged && !favsChanged) return null;
+
+	const next: any = { ...data };
+	if (channelsChanged) next.channels = keep;
+	if (favsChanged) next.channelFavorites = favKeep;
+
+	if (Array.isArray(data.sections)) {
+		const sections = data.sections.slice();
+		// Retarget by original count, and never reuse a slot, so the channel and
+		// favourite sections can't both land on the same index when their lengths
+		// happen to coincide.
+		const used = new Set<number>();
+		const retarget = (from: number, to: number) => {
+			if (from === to) return;
+			const i = sections.findIndex((n: number, idx: number) => n === from && !used.has(idx));
+			if (i !== -1) {
+				used.add(i);
+				sections[i] = to;
+			}
+		};
+		if (channelsChanged) retarget(channels.length, keep.length);
+		if (favsChanged) retarget(favs!.length, favKeep!.length);
+		next.sections = sections;
+	}
+
+	// The list memoises its layout on dataKey; without a new one it reuses the
+	// old cell count and the row reappears as an empty gap.
+	next.dataKey = `${data.dataKey}-qf${keep.length}.${favKeep ? favKeep.length : 0}`;
+	return next;
+}
+
 export interface ApplyResult {
 	applied: string[];
 	skipped: string[];
@@ -189,6 +239,33 @@ function hook(args: any[]): any[] | undefined {
 					hideStats.memberRowsHidden++;
 					const next = args.slice();
 					next[0] = TOUCH_BLOCKER;
+					return next;
+				}
+			}
+
+			// The DM list itself. Its rows come from a single `data` object:
+			//
+			//   data = {
+			//     channels:         [{ channelId, lastMessageId, isFavorite, isRequest }, …],
+			//     channelFavorites: [ … ],
+			//     sections:         number[],   // row COUNT per section
+			//     dataKey:          string,     // memoisation key
+			//   }
+			//
+			// Filtering `channels` on its own is not enough: `sections` decides how
+			// many cells the list builds, and `dataKey` memoises the computed layout.
+			// All three have to move together, or the removed row comes back as an
+			// empty-but-tappable cell — which is exactly what the earlier
+			// store-filtering attempts produced.
+			//
+			// Entries carry only a channelId, so the channel is resolved through
+			// ChannelStore to test its recipients.
+			if (Array.isArray(props?.data?.channels) && "listItemHeight" in props) {
+				const filtered = filterDMListData(props.data);
+				if (filtered) {
+					hideStats.dmDataFiltered += props.data.channels.length - filtered.channels.length;
+					const next = args.slice();
+					next[1] = { ...props, data: filtered };
 					return next;
 				}
 			}
