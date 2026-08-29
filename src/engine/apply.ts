@@ -44,6 +44,8 @@ import type { Sheet, StyleObject, Unpatch } from "../types";
 
 // component reference -> styles to inject onto it
 let componentOverrides = new Map<unknown, StyleObject[]>();
+// predicate targets, for components that cannot be resolved by reference
+let predicateOverrides: { match: (t: unknown, p: any) => boolean; styles: StyleObject[] }[] = [];
 // user id -> style to inject onto anything belonging to that user
 let userOverrides = new Map<string, StyleObject>();
 // key set of userOverrides, for a cheap size check in the hot path
@@ -233,9 +235,21 @@ export interface ApplyResult {
 }
 
 // Merge styles into a props object, appending last so they win on conflict.
-function mergeStyle(props: any, styles: StyleObject[]): any {
+//
+// Native host components (a string element type such as "RCTText") are the end
+// of the line: React Native's JS wrappers normally flatten styles before handing
+// them over, so a host given a nested array quietly ignores it. Flattening for
+// those is what makes styling text work at all — Discord renders straight to
+// RCTText rather than through RN's `Text`, so the host case is the common one,
+// not the exotic one.
+function mergeStyle(props: any, styles: StyleObject[], type?: unknown): any {
 	const base = props ?? {};
-	return { ...base, style: [base.style, ...styles] };
+	const merged = [base.style, ...styles];
+	if (typeof type === "string") {
+		const flatten = (ReactNative as any)?.StyleSheet?.flatten;
+		if (typeof flatten === "function") return { ...base, style: flatten(merged) };
+	}
+	return { ...base, style: merged };
 }
 
 // A copy of a message row with everything renderable stripped out, so that
@@ -426,7 +440,7 @@ function hook(args: any[]): any[] | undefined {
 			const uid = findBlockedUserId(props, blockedIds);
 			if (uid) {
 				const next = args.slice();
-				next[1] = mergeStyle(props, [userOverrides.get(uid)!]);
+				next[1] = mergeStyle(props, [userOverrides.get(uid)!], type);
 				return next;
 			}
 		}
@@ -435,8 +449,23 @@ function hook(args: any[]): any[] | undefined {
 		const styles = componentOverrides.get(type);
 		if (styles) {
 			const next = args.slice();
-			next[1] = mergeStyle(props, styles);
+			next[1] = mergeStyle(props, styles, type);
 			return next;
+		}
+
+		// Predicate targets, for components with no resolvable reference. Checked
+		// last, and only when some target actually uses one, so the usual path
+		// stays a single Map lookup.
+		if (predicateOverrides.length) {
+			let matched: StyleObject[] | null = null;
+			for (const p of predicateOverrides) {
+				if (p.match(type, props)) (matched ??= []).push(...p.styles);
+			}
+			if (matched) {
+				const next = args.slice();
+				next[1] = mergeStyle(props, matched, type);
+				return next;
+			}
 		}
 	} catch {
 		// Never let a matching error break Discord's render.
@@ -672,6 +701,7 @@ function uninstall(): void {
 // Revert every applied override.
 export function clear(): void {
 	componentOverrides = new Map();
+	predicateOverrides = [];
 	userOverrides = new Map();
 	blockedIds = new Set();
 	rowComponents = new Set();
@@ -681,6 +711,7 @@ export function clear(): void {
 // Apply a parsed sheet. Safe to call repeatedly.
 export function applySheet(sheet: Sheet): ApplyResult {
 	componentOverrides = new Map();
+	predicateOverrides = [];
 	userOverrides = new Map();
 	blockedIds = new Set();
 	const result: ApplyResult = { applied: [], skipped: [], failed: [] };
@@ -701,11 +732,24 @@ export function applySheet(sheet: Sheet): ApplyResult {
 			continue;
 		}
 		try {
-			const component = target.resolve();
-			if (!component) throw new Error(`component for "${key}" not found`);
-			const arr = componentOverrides.get(component) ?? [];
-			arr.push(style);
-			componentOverrides.set(component, arr);
+			// A target may name several references — a native host component and
+			// the JS wrapper over it, say — since which one an app actually renders
+			// varies. Every one that resolves gets the style.
+			const resolved = target.resolve?.();
+			const components = (Array.isArray(resolved) ? resolved : [resolved]).filter(
+				(c) => c != null,
+			);
+			if (!components.length && !target.match) {
+				throw new Error(`component for "${key}" not found`);
+			}
+			for (const component of components) {
+				const arr = componentOverrides.get(component) ?? [];
+				arr.push(style);
+				componentOverrides.set(component, arr);
+			}
+			if (target.match) {
+				predicateOverrides.push({ match: target.match.bind(target), styles: [style] });
+			}
 			result.applied.push(key);
 		} catch (e) {
 			result.failed.push({ key, reason: (e as Error).message });

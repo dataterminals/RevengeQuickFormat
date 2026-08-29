@@ -36,8 +36,17 @@ export interface Target {
 	// "experimental" targets depend on Discord internals that may shift between
 	// app versions and need on-device verification.
 	status: TargetStatus;
-	// Resolve the component reference this target styles. The engine injects the
-	// user's style whenever React creates an element of this exact component.
-	// Returns null/undefined when the component can't be found.
-	resolve(): unknown;
+	// Resolve the component reference(s) this target styles. May return a single
+	// reference or an array of them — a native host component and the JS wrapper
+	// over it, for instance — and every one that resolves gets the style. Return
+	// null/undefined when the component can't be found.
+	//
+	// Optional, because some components cannot be resolved at all: Discord's own
+	// text component is an anonymous forwardRef with no displayName and no
+	// findable export, so there is no reference to hold on to. Such a target
+	// supplies `match` instead.
+	resolve?(): unknown | unknown[];
+	// Predicate alternative to `resolve`, tested against every element created.
+	// Keep it cheap — it runs on every element the app renders.
+	match?(type: unknown, props: any): boolean;
 }

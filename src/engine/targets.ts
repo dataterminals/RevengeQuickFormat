@@ -21,17 +21,45 @@ import type { Target } from "../types";
 export const targets: Target[] = [
 	{
 		key: "text",
-		label: "All text",
-		description: "Every text element in the app, including message text.",
-		status: "stable",
-		resolve: () => (ReactNative as any)?.Text,
+		label: "Text (partial)",
+		description:
+			"Text rendered through Discord's own text component. Coverage is partial — see notes.",
+		status: "experimental",
+		// There is no single seam for text on this build, and this target is
+		// honest about being partial.
+		//
+		// Measured on 342.16 over one screen: ReactNative.Text is never rendered
+		// as an element type at all (styling it does nothing, anywhere). The
+		// native host "RCTText" appears only twice, because React Native creates
+		// those elements inside its own module and they never pass through the
+		// jsx runtime we patch. Discord's design-system text component accounts
+		// for the rest — but it is an anonymous forwardRef with no displayName
+		// and no findable export, so it cannot be resolved by reference and is
+		// matched on its prop shape instead.
+		//
+		// The refs are kept alongside the predicate so anything that does render
+		// through them is still covered.
+		resolve: () => ["RCTText", (ReactNative as any)?.Text],
+		match: (type: any, props: any) =>
+			typeof type === "object" &&
+			type !== null &&
+			props != null &&
+			props.variant !== undefined &&
+			props.children !== undefined,
 	},
 	{
 		key: "textInput",
 		label: "Text inputs",
 		description: "Every text input, including the chat composer.",
-		status: "stable",
-		resolve: () => (ReactNative as any)?.TextInput,
+		status: "experimental",
+		// Same reasoning as above; the host name differs by platform, so all the
+		// plausible ones are registered and whichever exists will match.
+		resolve: () => [
+			"RCTSinglelineTextInputView",
+			"RCTMultilineTextInputView",
+			"AndroidTextInput",
+			(ReactNative as any)?.TextInput,
+		],
 	},
 ];
 

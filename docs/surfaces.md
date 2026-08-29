@@ -162,3 +162,36 @@ See `AndroidClaudeBridge`'s CLAUDE.md. Two gotchas:
   to force a fresh mount before dumping.
 - Recycled rows in a virtualized list often do not pass through `jsx` again;
   a remount is more reliable than scrolling.
+
+## Styling text — measured coverage
+
+The plugin's headline feature was **not working at all** before 2026-08-29. Its
+`text` target resolved to `ReactNative.Text`, which Discord never renders as an
+element type: setting a colour on it changed nothing anywhere on screen.
+
+Measured on 342.16 over one full screen, by patching the `jsx`/`jsxs` runtime and
+counting intercepted elements:
+
+| candidate seam | elements seen | usable |
+|---|---|---|
+| `ReactNative.Text` | 0 | no — never rendered |
+| host `"RCTText"` | 2 | barely |
+| Discord design-system text | 12 | **yes, the main one** |
+
+Most text never passes through the jsx runtime a plugin can patch: React Native
+creates host elements inside its own module. What *is* reachable is Discord's own
+text component — but it is an **anonymous `forwardRef`** with no `displayName`
+and no findable export, so it cannot be resolved by reference.
+
+That is why `Target` now supports **`match(type, props)`** alongside `resolve()`.
+The text target matches on prop shape (`variant` and `children` present) instead
+of identity. Verified live: styled text renders in the new colour.
+
+**Coverage is partial and should be described that way.** Plenty of text — DM
+names, timestamps, several headers — still renders through components not covered
+by either the refs or the predicate. Finding those is a matter of running the
+recorder on each screen and adding predicates; it is not one seam away.
+
+Host components also need their style **flattened**: React Native's JS wrappers
+normally flatten before handing off, so a host given a nested array silently
+ignores it.
