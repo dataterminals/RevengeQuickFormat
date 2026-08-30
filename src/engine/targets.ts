@@ -73,8 +73,8 @@ export const targets: Target[] = [
 		// and ignore anything merged into `style`.
 		//
 		// It is matched by name rather than resolved, because `findByName` cannot
-		// see it: the component has a name at render time but is never exported
-		// (`findByNameAll("BaseIconImage")` returns nothing). Reading the name off
+		// see it: the component has a name at render time, but
+		// `findByNameAll("BaseIconImage")` returns nothing on this build. Reading it off
 		// the type is the cheapest way to reach a component in that position.
 		match: (type: any) => typeof type === "function" && type.name === "BaseIconImage",
 	},

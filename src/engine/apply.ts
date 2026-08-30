@@ -70,9 +70,9 @@ const TOUCH_BLOCKER = (): any =>
 //
 // This is a third way to address a component, alongside a target's `resolve()`
 // (by reference) and `match()` (by prop shape). Discord ships plenty of
-// components that have a real name at render time but are never exported, so
-// `findByName` cannot see them — `DMRow` below and `BaseIconImage` in
-// targets.ts are both like this. The name on the type is the only handle we get.
+// components that have a real name at render time but that `findByName` cannot
+// reach on this build — `DMRow` below and `BaseIconImage` in targets.ts are both
+// like this. The name on the type is the only handle we get.
 function typeName(type: any): string | undefined {
 	if (typeof type === "function") return type.name || undefined;
 	if (type && typeof type === "object") {
@@ -150,8 +150,6 @@ function filterDMListData(data: any): any | null {
 	return next;
 }
 
-// Filter the member list's row set.
-//
 // The DM-search results list. `SearchList` takes a single flat `data` array
 // that interleaves section headers with the rows under them:
 //
@@ -190,6 +188,8 @@ function filterSearchListData(data: any[]): any[] | null {
 	);
 }
 
+// Filter the member list's row set.
+//
 // ChannelMemberStore.getProps(guildId, channelId) returns
 //   { listId, groups, rows, version }
 // where `rows` is one flat array of GROUP headers and MEMBER entries, and
@@ -344,7 +344,7 @@ function hook(args: any[]): any[] | undefined {
 
 			// Search / people results, and the "Suggested" list behind them. Both
 			// render through `memo(DMRow)`, matched by its render-time name — the
-			// component is never exported, so findByName("DMRow") returns null.
+			// findByName("DMRow") returns null on this build, so the name is all we get.
 			//
 			// This was previously gated on the props being exactly { user, onPress }.
 			// That shape is real, but only on the Suggested list: an actual search
@@ -595,8 +595,9 @@ function install(): void {
 	// no identities cross into JS, so there is nothing to filter downstream and
 	// an element-level swap can only leave a blank 56px cell behind.
 	//
-	// `MemberListStore` does not exist on this build; `ChannelMemberStore` is its
-	// replacement, which is why the earlier lookup came back null.
+	// `findByStoreName("MemberListStore")` returns null on this build, which is why
+	// the earlier lookup came back empty; `ChannelMemberStore` is what carries the
+	// rows here.
 	if (blockedIds.size) {
 		try {
 			const ChannelMemberStore: any = findByStoreName("ChannelMemberStore");

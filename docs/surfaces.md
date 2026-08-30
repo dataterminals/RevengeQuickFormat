@@ -84,8 +84,9 @@ MembersScreen → SearchableMembersScreen → GuildChannelUserList
                    onPress, onLongPress, start, end }
 ```
 
-**Data source: `ChannelMemberStore`.** `MemberListStore` does not exist on this
-build, which is why the earlier lookup returned null. The current store exposes:
+**Data source: `ChannelMemberStore`.** `findByStoreName("MemberListStore")`
+returns null on this build, which is why the earlier lookup found nothing. The
+current store exposes:
 
 ```
 getProps(guildId, channelId) -> { listId, groups, rows, version }
@@ -141,13 +142,38 @@ and the "Suggested" list behind them. No `record` prop exists on this build; the
 older `row.record.id` note is stale.
 
 It is matched **by its render-time name**, not by prop shape and not by
-reference. `findByName("DMRow")` returns null — the component has a real name
-but is never exported — so the name has to be read off the element type, through
-the `memo` wrapper (`type.type.name`). See "Addressing a component by name" below.
+reference. `findByName("DMRow")` returns null on this build, so the name has to
+be read off the element type, through the `memo` wrapper (`type.type.name`). See
+"Addressing a component by name" below.
 
-No filterable array was found feeding these results, so the row is swapped for a
-render-nothing component rather than removed from a data source. Rows are keyed,
-so a constant-per-key swap cannot shift any component's hook count.
+**The list's data is filterable, and that is the primary path.** `SearchList`
+takes a single flat `data` array that interleaves section headers with the rows
+under them:
+
+```
+{ type: "section", props: { title: "Friends" } }
+{ type: "dm", section: "Friends", props: { user, nickname, onPress, type } }
+```
+
+Every row names its own section by title, so this needs none of the index
+arithmetic the member list does: drop the hidden rows, then drop any section
+whose title no longer appears on a surviving row (`filterSearchListData` in
+`engine/apply.ts`). Rows of other kinds carry a `section` too and count as
+occupants, so a section is only removed when nothing at all is left in it.
+
+Skipping that second step is what left a **"Friends" header with no friends
+under it**, rendering directly above "Server Members" — the same rows-versus-
+section-metadata split as the DM list's `sections` counts.
+
+The `DMRow` name match is kept as a backstop for any `DMRow` rendered outside
+`SearchList`. Rows are keyed, so a constant-per-key swap cannot shift any
+component's hook count.
+
+> An earlier revision of this section said *"no filterable array was found
+> feeding these results"*. That was a limit of the tooling, not a property of
+> the client: before the recorder bucketed components by prop signature,
+> `memo(SearchList){data}` merged with every other `data`-carrying component in
+> the dump and never stood out. See "Writing down what you did not find" below.
 
 **Why the earlier attempt failed.** This section previously described the row as
 an *anonymous* component whose props were *exactly* `{ user, onPress }`, and the
@@ -194,7 +220,7 @@ most of Discord's UI needs.
 |---|---|---|
 | `resolve()` | by reference, via metro | the component is exported and findable |
 | `match(type, props)` | by prop shape | nothing else identifies it |
-| **name on the type** | `type.name`, unwrapped | it has a name but is never exported |
+| **name on the type** | `type.name`, unwrapped | it has a name, but `findByName` cannot reach it |
 
 The third case is common here and easy to miss. `DMRow` and `BaseIconImage` both
 have real names at render time, but neither is exported, so `findByName` and
@@ -232,6 +258,37 @@ Prefer a name over a prop-shape predicate when a name exists: prop sets change
 between screens and between app versions, and an arity check like
 `keys.length === 2` breaks the moment Discord adds a prop. That is precisely how
 the search hide came to be broken while looking correct.
+
+## Writing down what you did not find
+
+Every wrong claim this document has carried was a negative one, and each cost
+more than any of the positive findings did:
+
+| the doc said | what was actually true |
+|---|---|
+| the DM list is filtered through `PrivateChannelSortStore` | the list reads `data`; the store is not consulted |
+| the search row is anonymous, props exactly `{ user, onPress }` | it is `memo(DMRow)`, and results carry four props |
+| no filterable array feeds the search results | `SearchList` takes one, with the sections in it |
+
+None of these were sloppy observation. Each was accurate about what the tooling
+could see at the time, and then written down as a fact about the client. The
+third is the clearest case: `memo(SearchList){data}` was in the dumps all along,
+but until the recorder bucketed components by prop signature it merged with every
+other `data`-carrying component and never stood out.
+
+So phrase negative results as measurements, with the method and the build in
+them:
+
+- **not** "the component is never exported" — **"`findByName` cannot reach it on
+  this build"**
+- **not** "no filterable array feeds this list" — **"no array found in a
+  recorder sweep of this screen on 342.16"**
+- **not** "`MemberListStore` does not exist" — **"`findByStoreName` returns null
+  here"**
+
+The first phrasing tells the next person to stop looking. The second tells them
+what to try that you did not. A dump can prove something *is* there; it can
+almost never prove something is not.
 
 ## Recording your own captures
 
