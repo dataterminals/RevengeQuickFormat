@@ -3,7 +3,6 @@ import { useProxy } from "@vendetta/storage";
 import { Forms } from "@vendetta/ui/components";
 
 import { getLastResult, reapply } from "../controller";
-import { copyDiagnostics } from "../engine/diagnostics";
 import { parseSheet } from "../engine/parser";
 import { targets } from "../engine/targets";
 import { vstorage } from "../storage";
@@ -144,15 +143,6 @@ export default function Settings() {
 					subLabel={
 						'"user:<id>" — style everything from one user; { "display": "none" } hides them.'
 					}
-				/>
-			</FormSection>
-			<FormDivider />
-
-			<FormSection title="Troubleshooting">
-				<FormRow
-					label="Copy runtime diagnostics"
-					subLabel="Copies component info to the clipboard to share for debugging."
-					onPress={copyDiagnostics}
 				/>
 			</FormSection>
 		</ScrollView>

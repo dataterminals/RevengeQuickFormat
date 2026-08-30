@@ -53,28 +53,6 @@ let blockedIds = new Set<string>();
 // installed element-creation patches
 let patches: Unpatch[] = [];
 
-// Runtime counters for the DM-list hide, surfaced in the diagnostics report so
-// we can see whether the filters actually run and match on-device (-1 = not run).
-export const hideStats = {
-	channelStoreOk: false,
-	dmSortedPatched: false,
-	dmIdsPatched: false,
-	dmSortedIn: -1,
-	dmSortedOut: -1,
-	dmIdsIn: -1,
-	dmIdsOut: -1,
-	dmIdsResolved: -1,
-	dmRowHidden: 0,
-	dmDataFiltered: 0,
-	channelEl: null as string | null,
-	listEl: null as string | null,
-	userEls: [] as string[],
-	rowComponentsFound: 0,
-	memberRowsHidden: 0,
-	memberStorePatched: false,
-	memberStoreRemoved: 0,
-};
-
 // Swapped in for a blocked user's list row. Renders a transparent overlay that
 // claims tap touches (but yields to scrolling), so a leftover fixed-height cell
 // stays blank AND can't be tapped to open the hidden user — a stopgap for cells
@@ -108,20 +86,6 @@ function typeName(type: any): string | undefined {
 // ChannelStore reference (set during install) so the element hook can resolve a
 // channel id to its channel object while filtering a list's data.
 let channelStoreRef: any = null;
-
-// Resolved shared user-row component(s) — the member list, search results and
-// friends list all render user entries through these. An element of one of them
-// for a blocked user is swapped for a render-nothing component. Rows are keyed,
-// so a constant-per-key swap can't change any component's hook count (freeze-safe).
-//
-// NOTE: this resolves to nothing on 342.16 — both `findByName("UserRow")` and
-// the `UserRowSubLabel` lookup return null, so the set stays empty and the
-// branch that consults it never fires. The surfaces it was meant to cover are
-// handled elsewhere: the member list by filtering ChannelMemberStore.getProps,
-// search results by the DMRow name match. Kept because it costs one empty
-// Set.has() and would light up again on a build that does export UserRow, but
-// do not assume it is load-bearing.
-let rowComponents = new Set<unknown>();
 
 function isBlockedDMChannel(ch: any): boolean {
 	return (
@@ -311,50 +275,7 @@ function hook(args: any[]): any[] | undefined {
 		const type = args[0];
 		const props = args[1];
 
-		// Diagnostic: record the first element that carries a DM/group-channel
-		// object, so we can see what component renders a DM-list row and how.
-		if (!hideStats.channelEl && props?.channel?.recipients) {
-			try {
-				const t: any = type;
-				const name = t?.displayName || t?.name || (typeof t === "string" ? t : typeof t);
-				hideStats.channelEl = `type=${name} keys=[${Object.keys(props).slice(0, 16).join(",")}] ch.type=${props.channel.type} recip=${JSON.stringify(props.channel.recipients)?.slice(0, 50)}`;
-			} catch {
-				/* ignore */
-			}
-		}
-
-		// Diagnostic: record a few distinct user-bearing element shapes, to locate
-		// the member-list row (populated once a server member list is open).
-		if ((props?.user?.id || props?.member) && hideStats.userEls.length < 24) {
-			try {
-				const t: any = type;
-				const name = t?.displayName || t?.name || (typeof t === "string" ? t : typeof t);
-				const noise =
-					typeof name === "string" && (name.startsWith("UserProfile") || name.startsWith("You"));
-				if (!noise && !hideStats.userEls.some((s) => s.startsWith(`type=${name} `))) {
-					const uid = props.user?.id ?? props.member?.userId ?? props.member?.user?.id ?? "?";
-					const flags = `${typeof props.onPress === "function" ? "onPress " : ""}${props.guildId ? "guild " : ""}`;
-					hideStats.userEls.push(`type=${name} ${flags}keys=[${Object.keys(props).slice(0, 12).join(",")}] uid=${uid}`);
-				}
-			} catch {
-				/* ignore */
-			}
-		}
-
 		if (blockedIds.size) {
-			// Shared user row (member list / search results / friends list): drop a
-			// blocked user's whole row. Rows are keyed, so the null swap is freeze-safe.
-			if (rowComponents.has(type)) {
-				const uid =
-					props?.user?.id ?? props?.userId ?? props?.member?.userId ?? props?.member?.user?.id;
-				if (typeof uid === "string" && blockedIds.has(uid)) {
-					hideStats.memberRowsHidden++;
-					const next = args.slice();
-					next[0] = TOUCH_BLOCKER;
-					return next;
-				}
-			}
-
 			// "Happening Now" — the voice-activity carousel across the top of the
 			// Messages screen. Plain array of { kind, userId, voiceState, guildId },
 			// so a hidden user is simply dropped from it.
@@ -388,7 +309,6 @@ function hook(args: any[]): any[] | undefined {
 				blockedIds.has(props.user.id) &&
 				typeName(type) === "DMRow"
 			) {
-				hideStats.memberRowsHidden++;
 				const next = args.slice();
 				next[0] = TOUCH_BLOCKER;
 				return next;
@@ -414,7 +334,6 @@ function hook(args: any[]): any[] | undefined {
 			if (Array.isArray(props?.data?.channels) && "listItemHeight" in props) {
 				const filtered = filterDMListData(props.data);
 				if (filtered) {
-					hideStats.dmDataFiltered += props.data.channels.length - filtered.channels.length;
 					const next = args.slice();
 					next[1] = { ...props, data: filtered };
 					return next;
@@ -439,13 +358,8 @@ function hook(args: any[]): any[] | undefined {
 					if (!Array.isArray(v) || v.length === 0) continue;
 					const t0 = resolveChannel(v[0])?.type;
 					if (t0 !== 1 && t0 !== 3) continue;
-					if (!hideStats.listEl) {
-						const tt: any = type;
-						hideStats.listEl = `type=${tt?.displayName || tt?.name || typeof tt} prop=${k} len=${v.length} item0=${typeof v[0] === "string" ? "id" : "obj"} keys=[${Object.keys(props).slice(0, 16).join(",")}]`;
-					}
 					const filtered = v.filter((item: any) => !isBlockedDMChannel(resolveChannel(item)));
 					if (filtered.length !== v.length) {
-						hideStats.dmDataFiltered += v.length - filtered.length;
 						nextProps = nextProps ?? { ...props };
 						nextProps[k] = filtered;
 					}
@@ -463,7 +377,6 @@ function hook(args: any[]): any[] | undefined {
 			// DM *screen* header/input, whose hook count would flip on navigation.
 			const ch = props?.channel;
 			if (ch && "channelSelected" in props && "hasUnreadMessages" in props && isBlockedDMChannel(ch)) {
-				hideStats.dmRowHidden++;
 				const next = args.slice();
 				next[0] = TOUCH_BLOCKER;
 				return next;
@@ -575,22 +488,18 @@ function install(): void {
 				findByProps("getChannel", "getDMFromUserId") ??
 				findByProps("getChannel", "hasChannel");
 			channelStoreRef = ChannelStore;
-			hideStats.channelStoreOk = typeof ChannelStore?.getChannel === "function";
 			const isBlockedDM = (c: any): boolean =>
 				c?.type === 1 &&
 				Array.isArray(c.recipients) &&
 				c.recipients.some((r: any) => blockedIds.has(typeof r === "string" ? r : r?.id));
 
 			if (typeof sortedStore?.getSortedPrivateChannels === "function") {
-				hideStats.dmSortedPatched = true;
 				patches.push(
 					instead("getSortedPrivateChannels", sortedStore, function (this: unknown, args: any[], orig: any) {
 						const list = orig.apply(this, args);
 						try {
 							if (!Array.isArray(list)) return list;
 							const filtered = list.filter((c) => !isBlockedDM(c));
-							hideStats.dmSortedIn = list.length;
-							hideStats.dmSortedOut = filtered.length;
 							return filtered.length === list.length ? list : filtered;
 						} catch {
 							return list;
@@ -600,7 +509,6 @@ function install(): void {
 			}
 
 			if (typeof idsStore?.getPrivateChannelIds === "function") {
-				hideStats.dmIdsPatched = true;
 				patches.push(
 					instead("getPrivateChannelIds", idsStore, function (this: unknown, args: any[], orig: any) {
 						const ids = orig.apply(this, args);
@@ -612,9 +520,6 @@ function install(): void {
 								if (ch) resolved++;
 								return !isBlockedDM(ch);
 							});
-							hideStats.dmIdsIn = ids.length;
-							hideStats.dmIdsOut = filtered.length;
-							hideStats.dmIdsResolved = resolved;
 							return filtered.length === ids.length ? ids : filtered;
 						} catch {
 							return ids;
@@ -653,7 +558,6 @@ function install(): void {
 			// the object the store handed us. That also keeps the returned identity
 			// stable; a fresh object every call would re-render the list forever.
 			if (typeof ChannelMemberStore?.getProps === "function") {
-				hideStats.memberStorePatched = true;
 				const propsCache = new WeakMap<object, any>();
 				patches.push(
 					instead("getProps", ChannelMemberStore, function (this: unknown, args: any[], orig: any) {
@@ -668,7 +572,6 @@ function install(): void {
 								propsCache.set(props, props);
 								return props;
 							}
-							hideStats.memberStoreRemoved += next.removed;
 							const out = { ...props, rows: next.rows, groups: next.groups };
 							propsCache.set(props, out);
 							return out;
@@ -703,22 +606,6 @@ function install(): void {
 		}
 	}
 
-	// Resolve the shared user-row component(s) so we can drop a blocked user's row
-	// from the member list, search results and friends list in one place.
-	if (blockedIds.size) {
-		try {
-			rowComponents = new Set();
-			const add = (c: any) => {
-				if (c && (typeof c === "function" || typeof c === "object")) rowComponents.add(c);
-			};
-			add(findByName("UserRow"));
-			const sub: any = findByProps("UserRowSubLabel");
-			if (sub?.UserRow) add(sub.UserRow);
-			hideStats.rowComponentsFound = rowComponents.size;
-		} catch (e) {
-			console.warn("[QuickFormat] UserRow resolve failed:", e);
-		}
-	}
 }
 
 function uninstall(): void {
@@ -737,7 +624,6 @@ export function clear(): void {
 	predicateOverrides = [];
 	userOverrides = new Map();
 	blockedIds = new Set();
-	rowComponents = new Set();
 	uninstall();
 }
 

@@ -1,6 +1,5 @@
 import Settings from "./components/Settings";
 import { clear, reapply } from "./controller";
-import { installRowProbe, removeRowProbe } from "./engine/diagnostics";
 import { initStorage } from "./storage";
 
 // Plugin entry point. Revenge/Vendetta calls onLoad when the plugin is enabled
@@ -9,12 +8,10 @@ import { initStorage } from "./storage";
 
 export function onLoad(): void {
 	initStorage();
-	installRowProbe();
 	reapply();
 }
 
 export function onUnload(): void {
-	removeRowProbe();
 	clear();
 }
 
