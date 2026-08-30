@@ -756,8 +756,19 @@ export function applySheet(sheet: Sheet): ApplyResult {
 		}
 	}
 
-	if (componentOverrides.size > 0 || userOverrides.size > 0) install();
-	else uninstall();
+	// Predicate targets count too. A sheet made up only of `match` targets
+	// registers its predicates and then, without this, uninstalls the very
+	// patches that would consult them — so it silently does nothing. Latent
+	// until the first target with a `match` and no `resolve`.
+	if (
+		componentOverrides.size > 0 ||
+		predicateOverrides.length > 0 ||
+		userOverrides.size > 0
+	) {
+		install();
+	} else {
+		uninstall();
+	}
 
 	return result;
 }

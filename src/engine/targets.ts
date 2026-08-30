@@ -61,7 +61,63 @@ export const targets: Target[] = [
 			(ReactNative as any)?.TextInput,
 		],
 	},
+	{
+		key: "icon",
+		label: "Icons",
+		description: "The small glyphs throughout the UI — channel, toolbar and badge icons.",
+		status: "experimental",
+		// `BaseIconImage` was the most-rendered named component in the sweep after
+		// the layout primitives (139 elements), and it takes a real `style` prop,
+		// which is what makes it stylable at all — plenty of Discord's components
+		// route their styling through their own props (`textStyle`, `containerStyle`)
+		// and ignore anything merged into `style`.
+		//
+		// It is matched by name rather than resolved, because `findByName` cannot
+		// see it: the component has a name at render time but is never exported
+		// (`findByNameAll("BaseIconImage")` returns nothing). Reading the name off
+		// the type is the cheapest way to reach a component in that position.
+		match: (type: any) => typeof type === "function" && type.name === "BaseIconImage",
+	},
 ];
+
+// ---------------------------------------------------------------------------
+// Not a target (yet): usernames.
+//
+// The recorder does find username components — three anonymous memo shapes on
+// 342.16, all carrying `userId` + `userName` + `style`, plus a named
+// `Username{userId,username}` using the other spelling:
+//
+//   {effectDisplayType,ellipsizeMode,lineClamp,style,userId,userName,variant}
+//   {containerStyle,defaultColor,ellipsizeMode,lineClamp,maxFontSizeMultiplier,style,userId,userName,variant}
+//   {accessibilityLabel,accessibilityRole,containerStyle,defaultColor,guildId,lineClamp,maxFontSizeMultiplier,style,userId,userName,variant}
+//
+// A `userId`+`userName` predicate matches them, and it was left out anyway,
+// because it does not style anything a user would point at. **Message author
+// names are drawn by `host:DCDChat`** — the message list is native, so the
+// names in a conversation never pass through the jsx runtime at all, exactly
+// like message text. What is left renders once or twice a screen and was never
+// caught visibly changing across four verification runs.
+//
+// A knob that does nothing is worse than no knob, so this is a finding rather
+// than a target. Reaching author names needs the RowManager seam that the
+// message hiding already uses, not an element predicate.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Not a target: images.
+//
+// `ReactNative.Image` looks like the obvious win — the recorder counted 222
+// `Image` elements over one sweep, it resolves cleanly, and it would cover
+// avatars, emoji and attachments in one go. Registering it destabilises the
+// app. React Native uses that component internally, and merging a style array
+// into its props breaks its own handling of `defaultSource`, producing an
+// endless flood of
+//
+//   ReactImageView: Only local resources can be used as default image. Uri: res:/…
+//
+// until Discord goes down. Verified on 342.16, twice. If images are ever worth
+// revisiting, it needs a narrower seam than the shared RN primitive.
+// ---------------------------------------------------------------------------
 
 export function getTarget(key: string): Target | undefined {
 	return targets.find((t) => t.key === key);
