@@ -202,6 +202,25 @@ have real names at render time, but neither is exported, so `findByName` and
 anonymous components. The jsx recorder sees the names because it reads the
 element type as it is rendered, which is the same place the engine can read it.
 
+**Assume a rendered component will not resolve.** Nine names taken off the
+recorder and put through `findByName` on 342.16:
+
+| resolves | does not |
+|---|---|
+| `RowManager`, `FormRowPlaceholderItem` | `DMRow`, `UserRow`, `BaseIconImage`, `MessageRow`, `GroupMemberAvatar`, `Tabs`, `DCDChatItem` |
+
+Seven of nine return null. The two that resolve are worth reading carefully:
+`RowManager` is a class rather than a rendered component — the module bindings
+in this file (stores via `findByStoreName`, the jsx runtime via `findByProps`)
+are all of that kind and are not affected. `FormRowPlaceholderItem`, though, is
+an ordinary rendered component that resolves cleanly, so this is a strong
+tendency and not a rule: do not write off `resolve()` for components, just don't
+assume it before checking.
+
+The practical order is: try `findByName`, and when it returns null — which it
+usually will — reach for the name on the type before falling back to a prop-shape
+predicate. A name is a stabler identity than a prop set.
+
 Unwrap before reading it. React puts wrappers in between: `memo()` keeps the
 function on `.type`, `forwardRef()` on `.render`, and the two nest.
 `BaseIconImage` is a plain function so `type.name` works directly, but the
