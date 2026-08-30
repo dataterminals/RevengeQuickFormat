@@ -152,6 +152,44 @@ function filterDMListData(data: any): any | null {
 
 // Filter the member list's row set.
 //
+// The DM-search results list. `SearchList` takes a single flat `data` array
+// that interleaves section headers with the rows under them:
+//
+//   { type: "section", props: { title: "Friends" } }
+//   { type: "dm", section: "Friends", props: { user, nickname, onPress, type } }
+//
+// Every row names its own section by title, so unlike the member list there is
+// no index arithmetic to keep in step — but a section header still has to be
+// dropped once nothing is left under it, or it renders over the next section's
+// rows. That is the "Friends header with no friends" symptom.
+//
+// Rows of other kinds (messages, media) carry a `section` too and are counted
+// as occupants, so hiding a user never collapses a section they were not the
+// only member of.
+//
+// Returns null when nothing was hidden, so the caller leaves props untouched.
+function filterSearchListData(data: any[]): any[] | null {
+	let hidden = 0;
+	const kept = data.filter((entry: any) => {
+		if (entry?.type !== "section" && blockedIds.has(entry?.props?.user?.id)) {
+			hidden++;
+			return false;
+		}
+		return true;
+	});
+	if (!hidden) return null;
+
+	const populated = new Set<string>();
+	for (const entry of kept) {
+		if (entry?.type !== "section" && typeof entry?.section === "string") {
+			populated.add(entry.section);
+		}
+	}
+	return kept.filter(
+		(entry: any) => entry?.type !== "section" || populated.has(entry?.props?.title),
+	);
+}
+
 // ChannelMemberStore.getProps(guildId, channelId) returns
 //   { listId, groups, rows, version }
 // where `rows` is one flat array of GROUP headers and MEMBER entries, and
@@ -288,6 +326,19 @@ function hook(args: any[]): any[] | undefined {
 						next[1] = { ...props, data: keep };
 						return next;
 					}
+				}
+			}
+
+			// DM-search results, at the data layer. This is the primary path: it
+			// takes the row out of the array the list builds from, which also lets
+			// us drop a section header once its last row is gone. The DMRow swap
+			// below stays as a backstop for any DMRow rendered outside SearchList.
+			if (typeName(type) === "SearchList" && Array.isArray(props?.data)) {
+				const filtered = filterSearchListData(props.data);
+				if (filtered) {
+					const next = args.slice();
+					next[1] = { ...props, data: filtered };
+					return next;
 				}
 			}
 
