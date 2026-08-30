@@ -86,6 +86,25 @@ const TOUCH_BLOCKER = (): any =>
 		onStartShouldSetResponder: () => true,
 	});
 
+// Read a component's render-time name, unwrapping the wrappers React puts
+// between us and the function: memo() keeps it on `.type`, forwardRef() on
+// `.render`, and the two nest.
+//
+// This is a third way to address a component, alongside a target's `resolve()`
+// (by reference) and `match()` (by prop shape). Discord ships plenty of
+// components that have a real name at render time but are never exported, so
+// `findByName` cannot see them — `DMRow` below and `BaseIconImage` in
+// targets.ts are both like this. The name on the type is the only handle we get.
+function typeName(type: any): string | undefined {
+	if (typeof type === "function") return type.name || undefined;
+	if (type && typeof type === "object") {
+		const inner = type.type ?? type.render;
+		if (typeof inner === "function") return inner.name || undefined;
+		if (inner && typeof inner === "object") return typeName(inner);
+	}
+	return undefined;
+}
+
 // ChannelStore reference (set during install) so the element hook can resolve a
 // channel id to its channel object while filtering a list's data.
 let channelStoreRef: any = null;
@@ -94,6 +113,14 @@ let channelStoreRef: any = null;
 // friends list all render user entries through these. An element of one of them
 // for a blocked user is swapped for a render-nothing component. Rows are keyed,
 // so a constant-per-key swap can't change any component's hook count (freeze-safe).
+//
+// NOTE: this resolves to nothing on 342.16 — both `findByName("UserRow")` and
+// the `UserRowSubLabel` lookup return null, so the set stays empty and the
+// branch that consults it never fires. The surfaces it was meant to cover are
+// handled elsewhere: the member list by filtering ChannelMemberStore.getProps,
+// search results by the DMRow name match. Kept because it costs one empty
+// Set.has() and would light up again on a build that does export UserRow, but
+// do not assume it is load-bearing.
 let rowComponents = new Set<unknown>();
 
 function isBlockedDMChannel(ch: any): boolean {
@@ -343,22 +370,28 @@ function hook(args: any[]): any[] | undefined {
 				}
 			}
 
-			// Search / people results. The row is an anonymous memo component whose
-			// props are exactly { user, onPress }, so it is matched on that shape
-			// rather than by name. Rows are keyed, so a constant-per-key swap can't
-			// shift any component's hook count.
+			// Search / people results, and the "Suggested" list behind them. Both
+			// render through `memo(DMRow)`, matched by its render-time name — the
+			// component is never exported, so findByName("DMRow") returns null.
+			//
+			// This was previously gated on the props being exactly { user, onPress }.
+			// That shape is real, but only on the Suggested list: an actual search
+			// result arrives as { user, onPress, nickname, type }, so the arity check
+			// never matched on the screen that mattered and the hide silently did
+			// nothing. Measured on 342.16 — 342 renders across a results screen, all
+			// carrying four props. Matching the name instead survives Discord adding
+			// a fifth.
+			//
+			// Rows are keyed, so a constant-per-key swap can't shift any hook count.
 			if (
 				props?.user?.id &&
-				typeof props.onPress === "function" &&
-				blockedIds.has(props.user.id)
+				blockedIds.has(props.user.id) &&
+				typeName(type) === "DMRow"
 			) {
-				const keys = Object.keys(props);
-				if (keys.length === 2 && keys.includes("user") && keys.includes("onPress")) {
-					hideStats.memberRowsHidden++;
-					const next = args.slice();
-					next[0] = TOUCH_BLOCKER;
-					return next;
-				}
+				hideStats.memberRowsHidden++;
+				const next = args.slice();
+				next[0] = TOUCH_BLOCKER;
+				return next;
 			}
 
 			// The DM list itself. Its rows come from a single `data` object:

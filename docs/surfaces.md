@@ -56,9 +56,15 @@ channel-array length — rather than a fixed index, because the section layout
 shifts with the favourites row and friend-suggestion block.
 
 Verified live on Discord 342.16: 6 DM rows → 5 with one user hidden, no gap and
-no leftover tappable cell; back to 6 when the sheet is cleared. Note that
-*removing* a hide needs an app restart before the row returns, because the list
-memoises its layout — a plugin restart alone is not enough.
+no leftover tappable cell; back to 6 when the sheet is cleared. Re-verified
+2026-08-29 on a second account: 8 → 7, and the one non-DM row in view shifted up
+by exactly one row height, so nothing is left behind.
+
+**The sheet has to be loaded at app start.** Writing a hide and restarting the
+*plugin* is not enough — the row stays on screen, because the list memoises its
+layout and never recomputes. This is true in both directions: adding a hide and
+removing one both need an `app stop` / `app start`, not a plugin refresh. Budget
+for it when testing; a change that "didn't work" has usually just not remounted.
 
 Note the `FastList` described below is the **guild channel list**, not this one.
 
@@ -130,17 +136,47 @@ entries with the hidden user absent.
 
 ## Search / people results
 
-The row is an **anonymous memo component whose props are exactly
-`{ user, onPress }`**, so it is matched on that shape rather than by name. No
-`record` prop exists on this build — the older `row.record.id` note is stale.
+The row is **`memo(DMRow)`** — the same component renders the DM-search results
+and the "Suggested" list behind them. No `record` prop exists on this build; the
+older `row.record.id` note is stale.
+
+It is matched **by its render-time name**, not by prop shape and not by
+reference. `findByName("DMRow")` returns null — the component has a real name
+but is never exported — so the name has to be read off the element type, through
+the `memo` wrapper (`type.type.name`). See "Addressing a component by name" below.
 
 No filterable array was found feeding these results, so the row is swapped for a
 render-nothing component rather than removed from a data source. Rows are keyed,
 so a constant-per-key swap cannot shift any component's hook count.
 
-> **Unverified.** The shape was captured live, but the hide itself was never
-> confirmed on screen — the app kept restoring into a DM conversation instead of
-> the search screen. Whether the collapsed row leaves a gap is therefore unknown.
+**Why the earlier attempt failed.** This section previously described the row as
+an *anonymous* component whose props were *exactly* `{ user, onPress }`, and the
+engine gated the swap on `Object.keys(props).length === 2`. Both halves were
+captured on the wrong screen: the **Suggested** list does render with those two
+props, but an actual **search result** arrives as
+`{ user, onPress, nickname, type }`. The arity check therefore never matched
+where it mattered, and the hide silently did nothing on every real result.
+Measured on 342.16: 342 `memo(DMRow)` renders across one results screen, all
+four props. This is the same failure mode as the DM list and the member list —
+a binding taken from the surface that was easy to reach rather than the one that
+matters.
+
+**Verified live on Discord 342.16**, A/B on the query `pric` in one session:
+
+| | Friends header | hidden row | Server Members | first member row |
+|---|---|---|---|---|
+| hide off | 389 | **518** | 668 | 797 |
+| hide on | 389 | — | 500 | 629 |
+
+Everything below the hidden row shifts up by exactly one row height (168px), so
+the row is fully removed — **no blank cell and no gap**, which was the open
+question here.
+
+> **Known cosmetic issue.** A section header is not removed when the hide empties
+> it: with the only Friends result hidden, the "Friends" header still renders,
+> directly above "Server Members". Harmless, but it is the same class of problem
+> as the DM list's `sections` counts — the row list and the section metadata are
+> maintained separately, and only the rows are being filtered.
 
 ## Messages
 
@@ -148,6 +184,35 @@ Unchanged and still the most reliable binding: `RowManager.prototype.generate`,
 message rows are `rowType === 1`, author at `row.message.author.id`. Rendering
 nothing requires generating from an emptied clone; element-level
 `display: none` alone leaves a skeleton placeholder.
+
+## Addressing a component by name
+
+There are three ways to reach a component, not two, and the third is the one
+most of Discord's UI needs.
+
+| | how | when |
+|---|---|---|
+| `resolve()` | by reference, via metro | the component is exported and findable |
+| `match(type, props)` | by prop shape | nothing else identifies it |
+| **name on the type** | `type.name`, unwrapped | it has a name but is never exported |
+
+The third case is common here and easy to miss. `DMRow` and `BaseIconImage` both
+have real names at render time, but neither is exported, so `findByName` and
+`findByNameAll` return nothing for either — they look, from metro, exactly like
+anonymous components. The jsx recorder sees the names because it reads the
+element type as it is rendered, which is the same place the engine can read it.
+
+Unwrap before reading it. React puts wrappers in between: `memo()` keeps the
+function on `.type`, `forwardRef()` on `.render`, and the two nest.
+`BaseIconImage` is a plain function so `type.name` works directly, but the
+search row is `memo(DMRow)` and `type.name` there is `undefined` — a mismatch
+that fails silently and looks exactly like the component never rendering. See
+`typeName()` in `engine/apply.ts`.
+
+Prefer a name over a prop-shape predicate when a name exists: prop sets change
+between screens and between app versions, and an arity check like
+`keys.length === 2` breaks the moment Discord adds a prop. That is precisely how
+the search hide came to be broken while looking correct.
 
 ## Recording your own captures
 
