@@ -92,11 +92,15 @@ export const targets: Target[] = [
 //   {accessibilityLabel,accessibilityRole,containerStyle,defaultColor,guildId,lineClamp,maxFontSizeMultiplier,style,userId,userName,variant}
 //
 // A `userId`+`userName` predicate matches them, and it was left out anyway,
-// because it does not style anything a user would point at. **Message author
-// names are drawn by `host:DCDChat`** — the message list is native, so the
-// names in a conversation never pass through the jsx runtime at all, exactly
-// like message text. What is left renders once or twice a screen and was never
-// caught visibly changing across four verification runs.
+// because it did not style anything a user would point at. **Message author
+// names are drawn by `host:DCDChat`** — the message list is native, and no
+// author name was seen passing through the jsx runtime on 342.16, the same as
+// message text. What is left renders once or twice a screen and was not caught
+// visibly changing across four verification runs.
+//
+// Both of those are what the recorder saw, not proof of what cannot exist —
+// the DM list, `DMRow` and `SearchList` were each written up as absent before
+// better tooling found them.
 //
 // A knob that does nothing is worse than no knob, so this is a finding rather
 // than a target. Reaching author names needs the RowManager seam that the
