@@ -2,9 +2,9 @@
 
 Captured live from a running Kettu-patched Discord **342.16** on 2026-08-29,
 by patching the `jsx`/`jsxs` runtime and recording component names and prop keys
-while navigating. Reproduce with the harness in
-[`AndroidClaudeBridge`](https://github.com/dataterminals/AndroidClaudeBridge)
-(`abridge eval -f <probe>.js`).
+while navigating. Reproduce with the jsx recorder in
+[`AndroidClaudeBridge`](https://github.com/dataterminals/AndroidClaudeBridge) —
+see [Recording your own captures](#recording-your-own-captures) below.
 
 This replaces guesswork. Each surface below says what actually renders it, which
 prop carries the user id, and — importantly — why the earlier approach failed.
@@ -151,17 +151,33 @@ nothing requires generating from an emptied clone; element-level
 
 ## Recording your own captures
 
-```js
-// installs a jsx/jsxs recorder into globalThis.__rec
-// then:  __rec.dump("member|user")   ->  { ComponentName: [propKeys…] }
+The recorder ships with the harness, and the daemon serves it at `/__probe/`:
+
+```sh
+abridge plugin install http://localhost:4040/__probe/
+abridge app stop cocobo1.pupu.app && abridge app start cocobo1.pupu.app
+abridge eval "__rec.dump('member|user')"   # count · name · propKeys, per line
+abridge eval "__rec.byProps('user')"       # only what carries these props
 ```
 
-See `AndroidClaudeBridge`'s CLAUDE.md. Two gotchas:
+See [`AndroidClaudeBridge`'s `probes/README.md`](https://github.com/dataterminals/AndroidClaudeBridge/blob/master/probes/README.md).
+Three gotchas:
 
+- **It has to be a plugin, and the app has to be restarted.** Running it from
+  `abridge eval` records almost nothing: Kettu patches `jsx`/`jsxs` at startup
+  and Discord's compiled modules capture that reference on import, so a later
+  patch replaces a property nothing reads again. Measured on one screen — 2
+  components installed late, 85 loaded at app start. A `plugin refresh` alone
+  is also too late.
 - Components already mounted will not re-render, so navigate **away and back**
   to force a fresh mount before dumping.
 - Recycled rows in a virtualized list often do not pass through `jsx` again;
   a remount is more reliable than scrolling.
+
+Anonymous components — the ones that matter here, since anything named is
+reachable through `findByName` — are reported by prop signature rather than
+lumped together, e.g. `memo(anon()){guildId,size,status,style,user}`. That
+signature is what `match(type, props)` binds against.
 
 ## Styling text — measured coverage
 
